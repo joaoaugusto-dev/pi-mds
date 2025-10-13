@@ -1,14 +1,17 @@
 name: pi_mds
-description: A sample command-line application.
+description: Dashboard Console para Sistema IoT ESP32 - Controle de Iluminação e Climatização
 version: 1.0.0
-# repository: https://github.com/my_org/my_repo
 
 environment:
   sdk: ^3.9.1
 
-# Add regular dependencies here.
 dependencies:
-  path: ^1.9.0
+  http: ^1.1.0
+  mysql1: ^0.20.0
+  intl: ^0.19.0
+  crypto: ^3.0.3
+  io: ^1.0.4
+  collection: ^1.18.0
 
 dev_dependencies:
   lints: ^6.0.0
