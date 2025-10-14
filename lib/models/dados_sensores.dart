@@ -56,8 +56,6 @@ class DadosSensores {
     bool? climaLigado,
     bool? climaUmidificando,
     int? climaVelocidade,
-    bool? modoManualIlum,
-    bool? modoManualClima,
     int? iluminacaoArtificial,
   }) {
     return {
@@ -70,8 +68,6 @@ class DadosSensores {
       'clima_ligado': climaLigado ?? false,
       'clima_umidificando': climaUmidificando ?? false,
       'clima_velocidade': climaVelocidade ?? 0,
-      'modo_manual_ilum': modoManualIlum ?? false,
-      'modo_manual_clima': modoManualClima ?? false,
       'iluminacao_artificial':
           iluminacaoArtificial ?? this.iluminacaoArtificial,
     };

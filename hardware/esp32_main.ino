@@ -62,7 +62,7 @@ const unsigned long INTERVALO_CLIMA_AUTO = 5000;
 const unsigned long INTERVALO_COMANDOS = 3000;
 const unsigned long MODO_CADASTRO_TIMEOUT = 60000; // 60 segundos
 const unsigned long INTERVALO_DEBUG = 5000;
-const unsigned long INTERVALO_PREF_CHECK = 30000;
+const unsigned long INTERVALO_PREF_CHECK = 30000; // Verificar preferências a cada 30s
 
 // === OBJETOS GLOBAIS ===
 MFRC522 mfrc522(SS_PIN, RST_PIN);
@@ -79,12 +79,12 @@ struct DadosSensores {
 } sensores;
 
 struct {
-  bool ligado : 1;
-  bool umidificando : 1;
-  bool aletaV : 1;
-  bool aletaH : 1;
-  uint8_t velocidade : 2;
-  uint8_t ultimaVel : 2;
+  bool ligado : 1;           // Estado atual: ligado/desligado
+  bool umidificando : 1;     // PRESERVADO ao desligar - aparelho físico mantém
+  bool aletaV : 1;           // PRESERVADO ao desligar - aparelho físico mantém
+  bool aletaH : 1;           // PRESERVADO ao desligar - aparelho físico mantém
+  uint8_t velocidade : 2;    // 0=desligado, 1-3=velocidades (ciclo: 1→2→3→1)
+  uint8_t ultimaVel : 2;     // PRESERVADO ao desligar - para restaurar ao ligar
   uint8_t timer : 3;
   uint8_t reservado : 5;
   unsigned long ultimaAtualizacao;
@@ -133,6 +133,7 @@ struct {
 // === CONTROLE DE TEMPO ===
 unsigned long tempos[8] = { 0 };
 unsigned long cadastroInicio = 0;
+unsigned long ultimaVerificacaoPrefs = 0;
 
 // === CARACTERES PERSONALIZADOS PARA LCD ===
 uint8_t SIMBOLO_PESSOA[8] = { 0x0E, 0x0E, 0x04, 0x1F, 0x04, 0x0A, 0x0A, 0x00 };
@@ -402,11 +403,17 @@ void atualizarLCD() {
 
   lcd.clear();
 
-  if (flags.modoManualIlum || flags.modoManualClima) {
+  // CORREÇÃO: Mostrar indicador MANUAL apenas se realmente está em modo manual
+  // E não mostrar se acabou de resetar as flags
+  bool mostrarManual = false;
+  if (flags.modoManualIlum && sensores.luminosidade > 0) mostrarManual = true;
+  if (flags.modoManualClima && clima.ligado) mostrarManual = true;
+
+  if (mostrarManual) {
     lcd.setCursor(0, 0);
     lcd.print("MANUAL ");
-    if (flags.modoManualIlum) lcd.print("L");
-    if (flags.modoManualClima) lcd.print("C");
+    if (flags.modoManualIlum && sensores.luminosidade > 0) lcd.print("L");
+    if (flags.modoManualClima && clima.ligado) lcd.print("C");
     
     lcd.setCursor(8, 0);
     lcd.write(0); // Pessoa
@@ -430,7 +437,7 @@ void atualizarLCD() {
     lcd.print(sensores.luminosidade);
     lcd.print("%");
   } else {
-    // Tela principal
+    // Tela principal - modo automático
     lcd.setCursor(0, 0);
     lcd.write(0); // Pessoa
     lcd.print(pessoas.total);
@@ -892,13 +899,13 @@ void gerenciarPresenca(const String& tag) {
       entrando = true;
       
       if (pessoas.total == 1) {
-        // Reativa as automações e liga o backlight do LCD
+        // CORREÇÃO: Reativa APENAS as automações necessárias, sem forçar modo manual
         flags.monitorandoLDR = true;
         flags.ilumAtiva = false;
-        flags.modoManualIlum = false;
-        flags.modoManualClima = false;
+        // NÃO resetar flags de modo manual aqui - elas devem ser resetadas apenas no resetarSistema
+        // Isso evita que o sistema alterne entre manual/auto indevidamente
         lcd.backlight();
-        debugPrint("Primeira pessoa detectada. Automação reativada e backlight ligado.");
+        debugPrint("Primeira pessoa detectada. Monitoramento ativado e backlight ligado.");
       }
 
       debugPrint("Nova pessoa detectada - Tag: " + tag + ", Total: " + String(pessoas.total));
@@ -950,13 +957,48 @@ void gerenciarPresenca(const String& tag) {
     // Marcar que preferências precisam ser atualizadas (grupo mudou)
     pessoas.prefsAtualizadas = false;
     debugPrint("Grupo mudou (saida) - marcando prefsAtualizadas=false e solicitando recalc.");
-    // Se não estiver em processo de atualização, solicitar preferências novamente
+    
+    // CORREÇÃO: Ao recalcular preferências após saída, NÃO resetar flags de modo manual
+    // Isso permite que o usuário continue em modo manual mesmo após mudanças no grupo
     if (!flags.atualizandoPref && flags.wifiOk) {
       debugPrint("Consultando preferências após saída...");
       // pequena espera para estabilizar escrita no Firebase
       delay(150);
       if (consultarPreferencias()) {
         debugPrint("Preferências atualizadas com sucesso após saída.");
+        
+        // NOVO: Se não estiver em modo manual, aplicar as novas preferências
+        if (!flags.modoManualClima && clima.ligado) {
+          float tempAlvo = pessoas.tempPref;
+          float diff = sensores.temperatura - tempAlvo;
+          int velDesejada = 1;
+          if (diff >= 4.5) velDesejada = 3;
+          else if (diff >= 3.0) velDesejada = 2;
+          
+          if (diff <= -0.5) {
+            debugPrint("Desligando clima após saída (temp adequada)");
+            enviarComandoIR(IR_POWER);
+          } else if (clima.velocidade != velDesejada) {
+            debugPrint("Ajustando velocidade após saída: " + String(velDesejada));
+            int tentativas = 0;
+            while (clima.velocidade != velDesejada && tentativas < 3) {
+              if (enviarComandoIR(IR_VELOCIDADE)) tentativas++;
+              else break;
+              delay(700);
+            }
+          }
+        }
+        
+        if (!flags.modoManualIlum && flags.ilumAtiva) {
+          int nivelDesejado = pessoas.lumPref;
+          if (nivelDesejado == 0) nivelDesejado = 25;
+          if (sensores.luminosidade != nivelDesejado) {
+            debugPrint("Ajustando iluminação após saída: " + String(nivelDesejado) + "%");
+            configurarRele(nivelDesejado);
+          }
+        }
+        
+        atualizarLCD();
       } else {
         debugPrint("Falha ao atualizar preferências imediatamente após saída. Será tentado novamente pelo fluxo normal.");
       }
@@ -980,6 +1022,44 @@ void gerenciarPresenca(const String& tag) {
     lcd.print("Pessoas: ");
     lcd.print(pessoas.total);
     delay(500);
+    
+    // Se é a primeira pessoa voltando e climatizador estava desligado mas tinha velocidade salva
+    if (pessoas.total == 1 && !clima.ligado && clima.ultimaVel > 0 && !flags.modoManualClima) {
+      debugPrint("Restaurando climatizador com TODAS as configurações preservadas:");
+      debugPrint("  Velocidade: " + String(clima.ultimaVel));
+      debugPrint("  Umidificação: " + String(clima.umidificando ? "LIGADA" : "DESLIGADA"));
+      debugPrint("  Aleta Vertical: " + String(clima.aletaV ? "ATIVA" : "INATIVA"));
+      debugPrint("  Aleta Horizontal: " + String(clima.aletaH ? "ATIVA" : "INATIVA"));
+      
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.write(5); // Símbolo AR
+      lcd.print(" Restaurando");
+      lcd.setCursor(0, 1);
+      lcd.print("Vel:");
+      lcd.print(clima.ultimaVel);
+      if (clima.umidificando) lcd.print(" U");
+      if (clima.aletaV) lcd.print(" V");
+      if (clima.aletaH) lcd.print(" H");
+      delay(600);
+      
+      // Ligar o climatizador (aparelho físico já tem todas as configurações)
+      enviarComandoIR(IR_POWER);
+      delay(1000);
+      
+      // Verificar se a velocidade está correta
+      if (clima.ligado && clima.velocidade != clima.ultimaVel) {
+        debugPrint("Ajustando para velocidade salva: " + String(clima.velocidade) + " -> " + String(clima.ultimaVel));
+        int tentativas = 0;
+        int velAlvo = clima.ultimaVel;
+        while (clima.velocidade != velAlvo && tentativas < 3) {
+          if (enviarComandoIR(IR_VELOCIDADE)) tentativas++;
+          else break;
+          delay(700);
+        }
+      }
+      atualizarLCD();
+    }
   }
   
   // Se mudou o número de pessoas OU alguém entrou, e há pessoas presentes
@@ -1066,6 +1146,8 @@ void gerenciarPresenca(const String& tag) {
 }
 
 void resetarSistema() {
+  debugPrint("=== INICIANDO RESET DO SISTEMA ===");
+  
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Desativando...");
@@ -1076,19 +1158,42 @@ void resetarSistema() {
 
   // Desligar climatizador se estiver ligado
   if (clima.ligado) {
+    debugPrint("Desligando climatizador...");
     enviarComandoIR(IR_POWER);
-    delay(500);
+    delay(1000);
   }
 
   // Desligar iluminação
   lcd.setCursor(0, 1);
   lcd.print("Desl. Luzes... ");
+  debugPrint("Desligando iluminação...");
+  configurarRele(0);
+  delay(300);
+
+  // Reset COMPLETO de todas as flags
   flags.modoManualIlum = false;
   flags.modoManualClima = false;
   flags.ilumAtiva = false;
   flags.monitorandoLDR = true;
-  configurarRele(0);
-  delay(300);
+  flags.atualizandoPref = false;
+  flags.comandoIR = false;
+  flags.comandoApp = false;
+
+  // Limpar estado do climatizador no software
+  // IMPORTANTE: ultimaVel, umidificando, aletaV, aletaH são MANTIDAS
+  // O aparelho físico preserva TODAS as configurações quando desligado
+  clima.ligado = false;
+  clima.velocidade = 0;
+  // clima.ultimaVel PRESERVADA - para restaurar quando alguém voltar
+  // clima.umidificando PRESERVADA - aparelho físico mantém
+  // clima.aletaV PRESERVADA - aparelho físico mantém
+  // clima.aletaH PRESERVADA - aparelho físico mantém
+  clima.timer = 0; // Timer é resetado
+  clima.ultimaAtualizacao = 0;
+  
+  debugPrint("Climatizador resetado (configurações preservadas: vel=" + String(clima.ultimaVel) + 
+             ", umid=" + String(clima.umidificando) + ", aV=" + String(clima.aletaV) + 
+             ", aH=" + String(clima.aletaH) + ")");
 
   // Limpar dados das pessoas
   for (int i = 0; i < pessoas.count; i++) {
@@ -1101,10 +1206,16 @@ void resetarSistema() {
   pessoas.lumPref = 50;
   pessoas.prefsAtualizadas = false;
 
-  // Reset flags
-  flags.modoManualIlum = false;
-  flags.modoManualClima = false;
-  flags.atualizandoPref = false;
+  // Reset dos tempos de verificação
+  ultimaVerificacaoPrefs = 0;
+  for (int i = 0; i < 8; i++) {
+    tempos[i] = 0;
+  }
+
+  // Enviar estado final para o Firebase
+  debugPrint("Enviando estado final para Firebase...");
+  enviarDadosImediato();
+  delay(500);
 
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -1113,7 +1224,8 @@ void resetarSistema() {
   lcd.print("Standby");
   delay(1000);
 
-  debugPrint("✓ Sistema resetado - Standby");
+  debugPrint("✓ Sistema COMPLETAMENTE resetado - Standby");
+  debugPrint("=== RESET CONCLUÍDO ===\n");
 }
 
 void gerenciarIluminacao() {
@@ -1264,13 +1376,22 @@ void atualizarEstadoClima(uint8_t comando) {
   switch (comando) {
     case IR_POWER:
       if (clima.ligado) {
+        // Ao desligar: salvar velocidade e manter TODAS as configurações
+        // O aparelho físico mantém: velocidade, umidificação, aletas V/H
+        clima.ultimaVel = clima.velocidade;
         clima.ligado = false;
         clima.velocidade = 0;
-        debugPrint("Climatizador DESLIGADO");
+        // NOTA: umidificando, aletaV, aletaH NÃO são alteradas - o aparelho físico as mantém!
+        debugPrint("Climatizador DESLIGADO (configurações preservadas: vel=" + String(clima.ultimaVel) + 
+                   ", umid=" + String(clima.umidificando) + ", aV=" + String(clima.aletaV) + 
+                   ", aH=" + String(clima.aletaH) + ")");
       } else {
+        // Ao ligar: restaurar velocidade (as outras configurações já estão no aparelho)
         clima.ligado = true;
         clima.velocidade = clima.ultimaVel > 0 ? clima.ultimaVel : 1;
-        debugPrint("Climatizador LIGADO (vel: " + String(clima.velocidade) + ")");
+        debugPrint("Climatizador LIGADO (restaurando vel=" + String(clima.velocidade) + 
+                   ", umid=" + String(clima.umidificando) + ", aV=" + String(clima.aletaV) + 
+                   ", aH=" + String(clima.aletaH) + ")");
       }
       break;
       
@@ -1281,9 +1402,11 @@ void atualizarEstadoClima(uint8_t comando) {
       
     case IR_VELOCIDADE:
       if (clima.ligado) {
+        // Salvar velocidade antes de alterar
         clima.ultimaVel = clima.velocidade;
+        // Ciclo de velocidades: 1 → 2 → 3 → 1
         clima.velocidade = (clima.velocidade % 3) + 1;
-        debugPrint("Velocidade alterada para: " + String(clima.velocidade));
+        debugPrint("Velocidade alterada: " + String(clima.ultimaVel) + " -> " + String(clima.velocidade));
       }
       break;
       
@@ -1443,6 +1566,34 @@ void controleAutomaticoClima() {
       }
     }
   }
+
+  // Controle automático do umidificador (histerese: ligar <55%, desligar >65%)
+  // Só aplicar se houver pessoas no ambiente, leitura válida e não estiver em modo manual
+  if (pessoas.total > 0 && sensores.dadosValidos && !flags.modoManualClima) {
+    // Ligar umidificador se umidade estiver abaixo do limiar de acionamento
+    if (sensores.humidade < 55.0 && !clima.umidificando) {
+      debugPrint("Auto Umidificador: Humidade " + String(sensores.humidade) + "% < 55% -> LIGAR");
+      lcd.clear(); lcd.setCursor(0,0); lcd.write(2); lcd.print(" Auto Umidificar");
+      lcd.setCursor(0,1); lcd.print("H: "); lcd.print(sensores.humidade,1); lcd.print("%");
+      tocarSom(SOM_COMANDO);
+      delay(400);
+      enviarComandoIR(IR_UMIDIFICAR);
+      delay(500);
+      atualizarLCD();
+    }
+
+    // Desligar umidificador se umidade estiver acima do limiar de desligamento
+    if (sensores.humidade > 65.0 && clima.umidificando) {
+      debugPrint("Auto Umidificador: Humidade " + String(sensores.humidade) + "% > 65% -> DESLIGAR");
+      lcd.clear(); lcd.setCursor(0,0); lcd.write(2); lcd.print(" Auto Umidificar");
+      lcd.setCursor(0,1); lcd.print("H: "); lcd.print(sensores.humidade,1); lcd.print("%");
+      tocarSom(SOM_COMANDO);
+      delay(400);
+      enviarComandoIR(IR_UMIDIFICAR);
+      delay(500);
+      atualizarLCD();
+    }
+  }
 }
 
 void verificarComandos() {
@@ -1555,97 +1706,9 @@ void verificarComandos() {
     deletarDadosFirebase("/modo_cadastro");
   }
 
-  // --- NOVO: sincronizar com /climatizador caso o servidor tenha escrito diretamente ---
-  // Isso evita conflitos quando o backend atualiza o nó do climatizador sem usar /comandos
-  String remoteClima = lerDadosFirebase("/climatizador");
-  if (remoteClima.length() > 0 && remoteClima != "null") {
-    StaticJsonDocument<200> docClima;
-    DeserializationError err = deserializeJson(docClima, remoteClima);
-    if (!err) {
-      // Usar ultima_atualizacao para decidir se aplicamos a atualização remota
-      unsigned long remotoUlt = 0;
-      if (docClima.containsKey("ultima_atualizacao")) {
-        remotoUlt = (unsigned long) docClima["ultima_atualizacao"];
-      }
-
-      String origem = docClima.containsKey("origem") ? String((const char*)docClima["origem"]) : String("");
-
-      // Decidir aplicar a atualização remota com heurística mais robusta:
-      // - aplicar se a origem for diferente de "ir" (provém do servidor/app)
-      // - ou se o timestamp remoto for mais novo que o local
-      // - ou se não houver timestamp remoto e os estados (ligado/velocidade) divergirem
-      bool aplicarRemoto = false;
-      String motivo = "";
-
-      if (origem != "" && origem != "ir") {
-        aplicarRemoto = true;
-        motivo = "origem != ir";
-      }
-
-      if (!aplicarRemoto) {
-        if (remotoUlt == 0) {
-          // sem timestamp: se estado remoto diverge do local, aplicar
-          bool remotoLigado = docClima.containsKey("ligado") ? bool(docClima["ligado"]) : clima.ligado;
-          int remotoVel = docClima.containsKey("velocidade") ? int(docClima["velocidade"]) : clima.velocidade;
-          if (remotoLigado != clima.ligado || remotoVel != clima.velocidade) {
-            aplicarRemoto = true;
-            motivo = "sem timestamp e estados divergem";
-          }
-        } else if (remotoUlt > clima.ultimaAtualizacao + 500) {
-          aplicarRemoto = true;
-          motivo = "timestamp mais novo";
-        }
-      }
-
-      if (aplicarRemoto) {
-        bool remotoLigado = docClima.containsKey("ligado") ? bool(docClima["ligado"]) : clima.ligado;
-        int remotoVel = docClima.containsKey("velocidade") ? int(docClima["velocidade"]) : clima.velocidade;
-
-        if (!flags.modoManualClima) {
-          debugPrint("Sincronizar: aplicando atualizacao remota (" + motivo + ")");
-
-          // Ligar/desligar conforme remoto
-          if (remotoLigado && !clima.ligado) {
-            debugPrint("Sincronizar: enviando POWER para ligar (remoto)");
-            enviarComandoIR(IR_POWER);
-            delay(1200);
-          } else if (!remotoLigado && clima.ligado) {
-            debugPrint("Sincronizar: enviando POWER para desligar (remoto)");
-            enviarComandoIR(IR_POWER);
-            delay(500);
-          }
-
-          // Se ligado, ajustar velocidade para a remota (1..3)
-          if (remotoLigado && clima.ligado && remotoVel >= 1 && remotoVel <= 3 && clima.velocidade != remotoVel) {
-            debugPrint("Sincronizar velocidade: atual=" + String(clima.velocidade) + " alvo=" + String(remotoVel));
-            int tentativas = 0;
-            int tentativasMax = 5;
-            while (clima.velocidade != remotoVel && tentativas < tentativasMax) {
-              if (enviarComandoIR(IR_VELOCIDADE)) {
-                tentativas++;
-                unsigned long t0 = millis();
-                unsigned long espera = TIMEOUT_CONFIRMACAO + 400;
-                while (controleIR.estado != IR_OCIOSO && millis() - t0 < espera) {
-                  processarIRRecebido();
-                  delay(10);
-                }
-              } else {
-                break;
-              }
-            }
-            atualizarLCD();
-          }
-
-          // atualizar timestamp local para evitar re-aplicações imediatas
-          clima.ultimaAtualizacao = (remotoUlt > millis()) ? remotoUlt : millis();
-        } else {
-          debugPrint("Sincronizar: atualização remota ignorada por modo manual do climatizador");
-        }
-      } else {
-        debugPrint("Sincronizar: atualização remota ignorada (nao aplicavel). origem=" + origem + " remotoUlt=" + String(remotoUlt) + " localUlt=" + String(clima.ultimaAtualizacao));
-      }
-    }
-  }
+  // CORREÇÃO: Remover sincronização automática que causava modo manual indesejado
+  // A sincronização agora acontece APENAS via comandos explícitos, não por leitura passiva do /climatizador
+  // Isso evita que mudanças no Firebase (do servidor Dart) ativem modo manual acidentalmente
 }
 
 void processarIRRecebido() {
@@ -1668,9 +1731,15 @@ void processarIRRecebido() {
         atualizarEstadoClima(comando);
         atualizarTelaClimatizador();
         
-        // Forçar modo manual do climatizador quando usar controle físico
-        flags.modoManualClima = true;
-        tocarSom(SOM_COMANDO);
+        // CORREÇÃO: Só ativa modo manual se houver pessoas presentes
+        // Se não há pessoas, ignora comandos IR físicos (evita ativação acidental)
+        if (pessoas.total > 0) {
+          flags.modoManualClima = true;
+          debugPrint("✓ Modo manual clima ATIVADO (controle físico)");
+          tocarSom(SOM_COMANDO);
+        } else {
+          debugPrint("⚠ Comando IR ignorado - sem pessoas no ambiente");
+        }
       }
     }
     
@@ -1701,6 +1770,92 @@ void monitorarWiFi() {
       debugPrint("✓ WiFi reconectado: " + WiFi.localIP().toString());
       tocarSom(SOM_CONECTADO);
     }
+  }
+}
+
+// === VERIFICAÇÃO PERIÓDICA DE PREFERÊNCIAS ===
+void verificarAtualizacaoPreferencias() {
+  unsigned long agora = millis();
+  
+  // Só verificar se houver pessoas, WiFi OK e não estiver em modo manual
+  if (pessoas.total == 0 || !flags.wifiOk || flags.modoManualClima || flags.atualizandoPref) {
+    return;
+  }
+  
+  // Verificar a cada INTERVALO_PREF_CHECK (30 segundos)
+  if (agora - ultimaVerificacaoPrefs < INTERVALO_PREF_CHECK) {
+    return;
+  }
+  
+  ultimaVerificacaoPrefs = agora;
+  
+  debugPrint("⏰ Verificação periódica de preferências iniciada...");
+  
+  // Forçar reconsulta de preferências para aplicar mudanças do banco de dados
+  if (consultarPreferencias()) {
+    debugPrint("✓ Preferências atualizadas com sucesso (verificação periódica)");
+    
+    // Se não estiver em modo manual, aplicar ajustes imediatamente
+    if (!flags.modoManualIlum && pessoas.total > 0 && flags.ilumAtiva) {
+      int nivelDesejado = pessoas.lumPref;
+      if (nivelDesejado == 0) nivelDesejado = 25;
+      
+      if (sensores.luminosidade != nivelDesejado) {
+        debugPrint("🔆 Ajustando iluminação para nova preferência: " + String(nivelDesejado) + "%");
+        configurarRele(nivelDesejado);
+        atualizarLCD();
+      }
+    }
+    
+    // Aplicar ajustes ao climatizador se necessário
+    if (!flags.modoManualClima && pessoas.total > 0) {
+      float tempAlvo = pessoas.tempPref;
+      float diff = sensores.temperatura - tempAlvo;
+      
+      // Calcular velocidade desejada
+      int velDesejada = 1;
+      if (diff >= 4.5) velDesejada = 3;
+      else if (diff >= 3.0) velDesejada = 2;
+      
+      // Se precisa ligar/desligar
+      if (diff >= 2.0 && !clima.ligado) {
+        debugPrint("❄️ Ligando climatizador após atualização de preferência");
+        enviarComandoIR(IR_POWER);
+        delay(1500);
+        
+        // Ajustar velocidade se necessário
+        if (clima.ligado && clima.velocidade != velDesejada) {
+          int tentativas = 0;
+          while (clima.velocidade != velDesejada && tentativas < 5) {
+            if (enviarComandoIR(IR_VELOCIDADE)) {
+              tentativas++;
+              delay(800);
+            } else {
+              break;
+            }
+          }
+        }
+        atualizarLCD();
+      } else if (diff <= -0.5 && clima.ligado) {
+        debugPrint("🔥 Desligando climatizador após atualização de preferência");
+        enviarComandoIR(IR_POWER);
+        atualizarLCD();
+      } else if (clima.ligado && clima.velocidade != velDesejada) {
+        debugPrint("⚙️ Ajustando velocidade para nova preferência: " + String(velDesejada));
+        int tentativas = 0;
+        while (clima.velocidade != velDesejada && tentativas < 5) {
+          if (enviarComandoIR(IR_VELOCIDADE)) {
+            tentativas++;
+            delay(800);
+          } else {
+            break;
+          }
+        }
+        atualizarLCD();
+      }
+    }
+  } else {
+    debugPrint("⚠ Falha na verificação periódica de preferências");
   }
 }
 
@@ -1796,6 +1951,36 @@ void setup() {
     delay(2000);
   }
 
+  // Carregar último estado do climatizador do Firebase
+  if (flags.wifiOk) {
+    debugPrint("Carregando estado do climatizador do Firebase...");
+    String estadoJson = lerDadosFirebase("/climatizador");
+    if (estadoJson.length() > 0 && estadoJson != "null") {
+      StaticJsonDocument<200> doc;
+      DeserializationError error = deserializeJson(doc, estadoJson);
+      if (!error) {
+        // Restaurar TODAS as configurações preservadas pelo aparelho físico
+        if (doc.containsKey("ultima_velocidade")) {
+          clima.ultimaVel = doc["ultima_velocidade"];
+        }
+        if (doc.containsKey("umidificando")) {
+          clima.umidificando = doc["umidificando"];
+        }
+        if (doc.containsKey("aleta_vertical")) {
+          clima.aletaV = doc["aleta_vertical"];
+        }
+        if (doc.containsKey("aleta_horizontal")) {
+          clima.aletaH = doc["aleta_horizontal"];
+        }
+        debugPrint("✓ Configurações restauradas do Firebase:");
+        debugPrint("  - Velocidade: " + String(clima.ultimaVel));
+        debugPrint("  - Umidificação: " + String(clima.umidificando ? "ON" : "OFF"));
+        debugPrint("  - Aleta V: " + String(clima.aletaV ? "ON" : "OFF"));
+        debugPrint("  - Aleta H: " + String(clima.aletaH ? "ON" : "OFF"));
+      }
+    }
+  }
+  
   // Inicialização completa
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -1806,6 +1991,11 @@ void setup() {
   debugPrint("✓ Sistema ESP32 iniciado com sucesso!");
   debugPrint("✓ Firebase: " + String(FIREBASE_HOST));
   debugPrint("✓ WiFi: " + String(flags.wifiOk ? "Conectado" : "Desconectado"));
+  debugPrint("✓ Configurações do Climatizador Preservadas:");
+  debugPrint("  - Velocidade: " + String(clima.ultimaVel));
+  debugPrint("  - Umidificação: " + String(clima.umidificando ? "ON" : "OFF"));
+  debugPrint("  - Aleta V: " + String(clima.aletaV ? "ON" : "OFF"));
+  debugPrint("  - Aleta H: " + String(clima.aletaH ? "ON" : "OFF"));
   debugPrint("===========================================\n");
   
   delay(1000);
@@ -1853,6 +2043,9 @@ void loop() {
 
   // Verificar comandos do Firebase
   verificarComandos();
+
+  // NOVO: Verificar se há necessidade de atualizar preferências periodicamente
+  verificarAtualizacaoPreferencias();
 
   // Enviar dados para Firebase
   enviarDados();

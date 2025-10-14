@@ -11,38 +11,32 @@ class HistoricoDao {
     bool? climaLigado,
     bool? climaUmidificando,
     int? climaVelocidade,
-    bool? modoManualIlum,
-    bool? modoManualClima,
     int? iluminacaoArtificial,
   }) async {
     try {
       final conn = db.connection;
       if (conn != null) {
         // Inserir na ordem solicitada: temperatura, humidade, ldr,
-        // iluminacao_artificial, pessoas, tags_qtd, tags_presentes, clima_ligado,
-        // clima_umidificando, clima_velocidade, modo_manual_ilum, modo_manual_clima
-        int tagsQtd = dados.tags.length;
+        // iluminacao_artificial, pessoas, tags_presentes, clima_ligado,
+        // clima_umidificando, clima_velocidade
         await conn.query(
           '''INSERT INTO dados_historicos 
              (temperatura, humidade, ldr, iluminacao_artificial, pessoas,
-              tags_qtd, tags_presentes, clima_ligado, clima_umidificando,
-              clima_velocidade, modo_manual_ilum, modo_manual_clima)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+             tags_presentes, clima_ligado, clima_umidificando,
+             clima_velocidade)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
           [
             dados.temperatura,
             dados.humidade,
             dados.ldr,
             iluminacaoArtificial ?? dados.iluminacaoArtificial,
             dados.pessoas,
-            tagsQtd,
             dados.tags.isEmpty
                 ? '[]'
                 : '[${dados.tags.map((tag) => '"$tag"').join(',')}]',
             climaLigado ?? false,
             climaUmidificando ?? false,
             climaVelocidade ?? 0,
-            modoManualIlum ?? false,
-            modoManualClima ?? false,
           ],
         );
         // Mensagem de sucesso removida para evitar poluição do console em modo background
@@ -63,9 +57,8 @@ class HistoricoDao {
       if (conn == null) return historico;
 
       String query = '''
-        SELECT id, temperatura, humidade, ldr, iluminacao_artificial, pessoas, tags_qtd, tags_presentes,
-               clima_ligado, clima_umidificando, clima_velocidade,
-               modo_manual_ilum, modo_manual_clima, timestamp
+        SELECT id, temperatura, humidade, ldr, iluminacao_artificial, pessoas, tags_presentes,
+               clima_ligado, clima_umidificando, clima_velocidade, timestamp
         FROM dados_historicos
       ''';
 
@@ -89,14 +82,11 @@ class HistoricoDao {
           'ldr': row[3],
           'iluminacao_artificial': row[4],
           'pessoas': row[5],
-          'tags_qtd': row[6],
-          'tags_presentes': row[7],
-          'clima_ligado': row[8],
-          'clima_umidificando': row[9],
-          'clima_velocidade': row[10],
-          'modo_manual_ilum': row[11],
-          'modo_manual_clima': row[12],
-          'timestamp': row[13],
+          'tags_presentes': row[6],
+          'clima_ligado': row[7],
+          'clima_umidificando': row[8],
+          'clima_velocidade': row[9],
+          'timestamp': row[10],
         });
       }
     } catch (e) {
@@ -115,7 +105,6 @@ class HistoricoDao {
       'ldr': 0.0,
       'pessoas': 0.0,
       'iluminacao_artificial': 0.0,
-      'tags_qtd': 0.0,
     };
 
     try {
@@ -127,8 +116,7 @@ class HistoricoDao {
                AVG(humidade) as hum_media,
                AVG(ldr) as ldr_media,
                AVG(pessoas) as pessoas_media,
-               AVG(iluminacao_artificial) as ilum_media,
-               AVG(tags_qtd) as tags_qtd_media
+               AVG(iluminacao_artificial) as ilum_media
         FROM dados_historicos
       ''';
 
@@ -148,7 +136,6 @@ class HistoricoDao {
         medias['ldr'] = (row[2] as num?)?.toDouble() ?? 0.0;
         medias['pessoas'] = (row[3] as num?)?.toDouble() ?? 0.0;
         medias['iluminacao_artificial'] = (row[4] as num?)?.toDouble() ?? 0.0;
-        medias['tags_qtd'] = (row[5] as num?)?.toDouble() ?? 0.0;
       }
     } catch (e) {
       print("✗ Erro ao calcular médias históricas: $e");

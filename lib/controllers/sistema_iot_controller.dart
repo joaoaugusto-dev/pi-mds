@@ -21,8 +21,6 @@ class SistemaIotController {
   DadosSensores? _ultimaSensorData;
   EstadoClimatizador? _ultimoEstadoClima;
   List<String> _ultimasTags = [];
-  bool _modoManualIluminacao = false;
-  bool _modoManualClimatizador = false;
   String _comandoIluminacaoAtual = 'auto';
   bool verbose = true; // controla se prints devem ser exibidos
   bool _bgRunning = false;
@@ -31,10 +29,7 @@ class SistemaIotController {
   // Controle de duplicação
   DateTime? _ultimoTimestamp;
   String _ultimoHashTags = "";
-  // Controle para evitar reenvio repetido de comandos ao climatizador
-  String? _ultimoComandoClimatizador;
-  int _tsUltimoComandoClimatizador = 0; // epoch ms
-  final int _cooldownComandoClimatizadorMs = 15 * 1000; // 15s
+  // Controle de climatizador removido - ESP32 tem controle total da automação física
 
   SistemaIotController({
     required this.firebaseService,
@@ -46,8 +41,6 @@ class SistemaIotController {
   // Getters para estado atual
   DadosSensores? get ultimaSensorData => _ultimaSensorData;
   EstadoClimatizador? get ultimoEstadoClima => _ultimoEstadoClima;
-  bool get modoManualIluminacao => _modoManualIluminacao;
-  bool get modoManualClimatizador => _modoManualClimatizador;
   String get comandoIluminacaoAtual => _comandoIluminacaoAtual;
 
   // Processar solicitações de preferências do ESP32
@@ -143,15 +136,12 @@ class SistemaIotController {
         climaLigado: _ultimoEstadoClima?.ligado,
         climaUmidificando: _ultimoEstadoClima?.umidificando,
         climaVelocidade: _ultimoEstadoClima?.velocidade,
-        modoManualIlum: _modoManualIluminacao,
-        modoManualClima: _modoManualClimatizador,
         iluminacaoArtificial: iluminacaoArtificial,
       );
 
       // Aplicar automação se não estiver em modo manual
-      if (!_modoManualIluminacao && !_modoManualClimatizador) {
-        await _aplicarAutomacao(novosDados);
-      }
+      // Aplicar automação (lógica interna decide se aplica iluminação/clima)
+      await _aplicarAutomacao(novosDados);
 
       _log('✓ Dados processados: $novosDados');
     }
@@ -160,8 +150,8 @@ class SistemaIotController {
   // Aplicar automação baseada em preferências
   Future<void> _aplicarAutomacao(DadosSensores dados) async {
     if (dados.tags.isEmpty) {
-      // Sem pessoas: desligar iluminação
-      if (!_modoManualIluminacao) {
+      // Sem pessoas: desligar iluminação (aplicar apenas se não houver intervenção manual)
+      if (_comandoIluminacaoAtual == 'auto') {
         await _aplicarAutomacaoIluminacao(0);
       }
       return;
@@ -180,18 +170,14 @@ class SistemaIotController {
       );
     }
 
-    // Automação da iluminação
-    if (!_modoManualIluminacao) {
+    // Automação da iluminação — só aplicar se o comando atual estiver em 'auto'.
+    if (_comandoIluminacaoAtual == 'auto') {
       await _aplicarAutomacaoIluminacao(preferencias.luminosidadeUtilizada);
     }
 
     // Automação do climatizador
-    if (!_modoManualClimatizador && preferencias.temperaturaMedia != null) {
-      await _aplicarAutomacaoClimatizador(
-        dados.temperatura,
-        preferencias.temperaturaMedia!,
-      );
-    }
+    // Observação: o servidor nunca envia comandos automáticos ao climatizador.
+    // Portanto não aplicamos alteração aqui baseada em flags de modo manual.
   }
 
   // Processar solicitações de preferências: busca e cálculo via FuncionarioService
@@ -247,63 +233,9 @@ class SistemaIotController {
     }
   }
 
-  Future<void> _aplicarAutomacaoClimatizador(
-    double temperaturaAtual,
-    double temperaturaDesejada,
-  ) async {
-    double diferenca = temperaturaAtual - temperaturaDesejada;
-
-    // Determinar ação desejada
-    String? comandoDesejado;
-    if (diferenca > 2.0) {
-      comandoDesejado = 'power_on';
-    } else if (diferenca < -2.0) {
-      comandoDesejado = 'power_off';
-    }
-
-    if (comandoDesejado == null) return;
-
-    // Se já sabemos que o climatizador está no estado desejado, não enviar
-    if (_ultimoEstadoClima != null) {
-      if (comandoDesejado == 'power_on' && _ultimoEstadoClima!.ligado) return;
-      if (comandoDesejado == 'power_off' && !_ultimoEstadoClima!.ligado) return;
-    }
-
-    // Evitar reenvios rápidos: cooldown
-    final int now = DateTime.now().millisecondsSinceEpoch;
-    if (_ultimoComandoClimatizador == comandoDesejado &&
-        (now - _tsUltimoComandoClimatizador) < _cooldownComandoClimatizadorMs) {
-      _log(
-        '⏳ Ignorando reenvio de comando climatizador ($comandoDesejado) — cooldown',
-      );
-      return;
-    }
-
-    // Enviar comando
-    bool sucesso = await firebaseService.enviarComandoClimatizador(
-      comandoDesejado,
-    );
-    if (sucesso) {
-      _ultimoComandoClimatizador = comandoDesejado;
-      _tsUltimoComandoClimatizador = now;
-      if (comandoDesejado == 'power_on') {
-        _log(
-          '❄️ Automação clima: ligando (${temperaturaAtual.toStringAsFixed(1)}°C → ${temperaturaDesejada.toStringAsFixed(1)}°C)',
-        );
-      } else {
-        _log(
-          '🔥 Automação clima: desligando (${temperaturaAtual.toStringAsFixed(1)}°C → ${temperaturaDesejada.toStringAsFixed(1)}°C)',
-        );
-      }
-    } else {
-      _log('✗ Falha ao enviar comando climatizador: $comandoDesejado');
-    }
-  }
-
   // Controles manuais - Iluminação
   Future<bool> definirIluminacaoManual(dynamic nivel) async {
     if (nivel == 'auto') {
-      _modoManualIluminacao = false;
       _comandoIluminacaoAtual = 'auto';
       await firebaseService.enviarComandoIluminacao('auto');
       print('🔄 Iluminação voltou ao modo automático');
@@ -312,7 +244,6 @@ class SistemaIotController {
 
     int? nivelInt = int.tryParse(nivel.toString());
     if (nivelInt != null && [0, 25, 50, 75, 100].contains(nivelInt)) {
-      _modoManualIluminacao = true;
       _comandoIluminacaoAtual = nivel.toString();
       await firebaseService.enviarComandoIluminacao(nivel);
       _log('🔆 Iluminação manual: $nivel%');
@@ -326,12 +257,10 @@ class SistemaIotController {
   // Controles manuais - Climatizador
   Future<bool> enviarComandoClimatizador(String comando) async {
     if (comando == 'auto') {
-      _modoManualClimatizador = false;
       print('🔄 Climatizador voltou ao modo automático');
       return true;
     }
-
-    _modoManualClimatizador = true;
+    // Envia comando manual ao climatizador (servidor repassa ao ESP via Firebase)
     bool sucesso = await firebaseService.enviarComandoClimatizador(comando);
 
     if (sucesso) {
@@ -346,8 +275,6 @@ class SistemaIotController {
     return {
       'sensores': _ultimaSensorData?.toJson(),
       'climatizador': _ultimoEstadoClima?.toJson(),
-      'modo_manual_iluminacao': _modoManualIluminacao,
-      'modo_manual_climatizador': _modoManualClimatizador,
       'comando_iluminacao_atual': _comandoIluminacaoAtual,
       'tags_presentes': _ultimasTags,
       'timestamp': DateTime.now().toIso8601String(),

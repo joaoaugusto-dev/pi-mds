@@ -109,8 +109,8 @@ class DatabaseConnection {
       // Tabela de dados históricos dos sensores (para Power BI)
       // Ordem de colunas desejada:
       // id, temperatura, humidade, ldr, iluminacao_artificial, pessoas,
-      // tags_qtd, tags_presentes, clima_ligado, clima_umidificando,
-      // clima_velocidade, modo_manual_ilum, modo_manual_clima, timestamp
+      // tags_presentes, clima_ligado, clima_umidificando,
+      // clima_velocidade, timestamp
       await _connection!.query('''
         CREATE TABLE IF NOT EXISTS dados_historicos (
           id INT AUTO_INCREMENT PRIMARY KEY,
@@ -119,13 +119,10 @@ class DatabaseConnection {
           ldr INT,
           iluminacao_artificial INT DEFAULT 0,
           pessoas INT DEFAULT 0,
-          tags_qtd INT DEFAULT 0,
           tags_presentes JSON,
           clima_ligado BOOLEAN DEFAULT FALSE,
           clima_umidificando BOOLEAN DEFAULT FALSE,
           clima_velocidade INT DEFAULT 0,
-          modo_manual_ilum BOOLEAN DEFAULT FALSE,
-          modo_manual_clima BOOLEAN DEFAULT FALSE,
           timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       ''');

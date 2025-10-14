@@ -230,10 +230,7 @@ class MenuInterface {
   String _formatResumoSistema(Map<String, dynamic> data) {
     final sensores = data['sensores'] as Map<String, dynamic>?;
     final climatizador = data['climatizador'] as Map<String, dynamic>?;
-    final modoIlum = data['modo_manual_iluminacao'] == true ? 'MANUAL' : 'AUTO';
-    final modoClima = data['modo_manual_climatizador'] == true
-        ? 'MANUAL'
-        : 'AUTO';
+    final comandoIlum = data['comando_iluminacao_atual'] ?? 'auto';
     final tagsVal = data['tags_presentes'] ?? data['tags'] ?? [];
     String tagsStr;
     if (tagsVal is List) {
@@ -303,7 +300,9 @@ class MenuInterface {
     }
 
     lines.add(
-      _padInner('⚙️  Modos - Ilum: $modoIlum   Clima: $modoClima${' ' * 20}'),
+      _padInner(
+        '⚙️  Comando Iluminação: ${comandoIlum.toString().toUpperCase()}${' ' * 20}',
+      ),
     );
 
     return lines.join('\n');
