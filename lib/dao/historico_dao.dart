@@ -13,20 +13,23 @@ class HistoricoDao {
     int? climaVelocidade,
     bool? modoManualIlum,
     bool? modoManualClima,
+    int? intensidadeLuzes,
   }) async {
     try {
       final conn = db.connection;
       if (conn != null) {
         await conn.query(
           '''INSERT INTO dados_historicos 
-             (temperatura, humidade, luminosidade, pessoas, tags_presentes, 
+             (temperatura, humidade, luminosidade, ldr, intensidade_luzes, pessoas, tags_presentes, 
               clima_ligado, clima_umidificando, clima_velocidade, 
               modo_manual_ilum, modo_manual_clima) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
           [
             dados.temperatura,
             dados.humidade,
             dados.luminosidade,
+            dados.ldr,
+            intensidadeLuzes ?? dados.luminosidade,
             dados.pessoas,
             dados.tags.isEmpty
                 ? '[]'
@@ -56,7 +59,7 @@ class HistoricoDao {
       if (conn == null) return historico;
 
       String query = '''
-        SELECT id, temperatura, humidade, luminosidade, pessoas, tags_presentes,
+        SELECT id, temperatura, humidade, luminosidade, ldr, intensidade_luzes, pessoas, tags_presentes,
                clima_ligado, clima_umidificando, clima_velocidade,
                modo_manual_ilum, modo_manual_clima, timestamp
         FROM dados_historicos
@@ -80,14 +83,16 @@ class HistoricoDao {
           'temperatura': row[1],
           'humidade': row[2],
           'luminosidade': row[3],
-          'pessoas': row[4],
-          'tags_presentes': row[5],
-          'clima_ligado': row[6],
-          'clima_umidificando': row[7],
-          'clima_velocidade': row[8],
-          'modo_manual_ilum': row[9],
-          'modo_manual_clima': row[10],
-          'timestamp': row[11],
+          'ldr': row[4],
+          'intensidade_luzes': row[5],
+          'pessoas': row[6],
+          'tags_presentes': row[7],
+          'clima_ligado': row[8],
+          'clima_umidificando': row[9],
+          'clima_velocidade': row[10],
+          'modo_manual_ilum': row[11],
+          'modo_manual_clima': row[12],
+          'timestamp': row[13],
         });
       }
     } catch (e) {
@@ -104,6 +109,8 @@ class HistoricoDao {
       'temperatura': 0.0,
       'humidade': 0.0,
       'luminosidade': 0.0,
+      'ldr': 0.0,
+      'intensidade_luzes': 0.0,
       'pessoas': 0.0,
     };
 
@@ -115,6 +122,8 @@ class HistoricoDao {
         SELECT AVG(temperatura) as temp_media, 
                AVG(humidade) as hum_media,
                AVG(luminosidade) as lumi_media,
+               AVG(ldr) as ldr_media,
+               AVG(intensidade_luzes) as intensidade_media,
                AVG(pessoas) as pessoas_media
         FROM dados_historicos
       ''';
@@ -133,7 +142,9 @@ class HistoricoDao {
         medias['temperatura'] = (row[0] as num?)?.toDouble() ?? 0.0;
         medias['humidade'] = (row[1] as num?)?.toDouble() ?? 0.0;
         medias['luminosidade'] = (row[2] as num?)?.toDouble() ?? 0.0;
-        medias['pessoas'] = (row[3] as num?)?.toDouble() ?? 0.0;
+        medias['ldr'] = (row[3] as num?)?.toDouble() ?? 0.0;
+        medias['intensidade_luzes'] = (row[4] as num?)?.toDouble() ?? 0.0;
+        medias['pessoas'] = (row[5] as num?)?.toDouble() ?? 0.0;
       }
     } catch (e) {
       print("✗ Erro ao calcular médias históricas: $e");

@@ -2,6 +2,7 @@ class DadosSensores {
   double temperatura;
   double humidade;
   int luminosidade;
+  int ldr; // valor bruto do sensor LDR (ADC)
   int pessoas;
   List<String> tags;
   DateTime timestamp;
@@ -11,6 +12,7 @@ class DadosSensores {
     required this.temperatura,
     required this.humidade,
     required this.luminosidade,
+    required this.ldr,
     required this.pessoas,
     required this.tags,
     required this.timestamp,
@@ -22,6 +24,7 @@ class DadosSensores {
       temperatura: (json['temperatura'] as num?)?.toDouble() ?? 0.0,
       humidade: (json['humidade'] as num?)?.toDouble() ?? 0.0,
       luminosidade: json['luminosidade']?.toInt() ?? 0,
+      ldr: json['ldr']?.toInt() ?? 0,
       pessoas: json['pessoas']?.toInt() ?? 0,
       tags: List<String>.from(json['tags'] ?? []),
       timestamp: json['timestamp'] != null
@@ -36,6 +39,7 @@ class DadosSensores {
       'temperatura': temperatura,
       'humidade': humidade,
       'luminosidade': luminosidade,
+      'ldr': ldr,
       'pessoas': pessoas,
       'tags': tags,
       'timestamp': timestamp.millisecondsSinceEpoch,
@@ -55,6 +59,7 @@ class DadosSensores {
       'temperatura': temperatura,
       'humidade': humidade,
       'luminosidade': luminosidade,
+      'ldr': ldr,
       'pessoas': pessoas,
       'tags_presentes': tags.join(','),
       'clima_ligado': climaLigado ?? false,
@@ -67,6 +72,6 @@ class DadosSensores {
 
   @override
   String toString() {
-    return 'Sensores: ${temperatura.toStringAsFixed(1)}°C, ${humidade.toStringAsFixed(1)}%, ${luminosidade}lux, ${pessoas}p, tags:[${tags.join(',')}]';
+    return 'Sensores: ${temperatura.toStringAsFixed(1)}°C, ${humidade.toStringAsFixed(1)}%, luminosidade=$luminosidade%, ldr=$ldr, ${pessoas}p, tags:[${tags.join(',')}]';
   }
 }

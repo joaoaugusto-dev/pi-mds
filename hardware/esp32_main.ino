@@ -760,8 +760,9 @@ void enviarDados() {
   StaticJsonDocument<400> doc;
   doc["temperatura"] = round(sensores.temperatura * 10) / 10.0;
   doc["humidade"] = round(sensores.humidade);
-  doc["luminosidade"] = sensores.luminosidade;
-  doc["pessoas"] = pessoas.total;
+  doc["luminosidade"] = sensores.luminosidade != 0 ? sensores.luminosidade : 0;
+  doc["ldr"] = sensores.valorLDR != 0 ? sensores.valorLDR : 0;
+  doc["pessoas"] = pessoas.total != 0 ? pessoas.total : 0;
   doc["timestamp"] = millis(); // Timestamp local
   doc["dados_validos"] = sensores.dadosValidos;
 
@@ -787,7 +788,7 @@ void enviarDados() {
 
   // Estados do sistema
   doc["modo_manual_ilum"] = flags.modoManualIlum;
-  doc["valor_ldr"] = sensores.valorLDR;
+  doc["valor_ldr"] = sensores.valorLDR != 0 ? sensores.valorLDR : 0;
 
   String dados;
   serializeJson(doc, dados);
@@ -806,8 +807,9 @@ void enviarDadosImediato() {
   StaticJsonDocument<400> doc;
   doc["temperatura"] = round(sensores.temperatura * 10) / 10.0;
   doc["humidade"] = round(sensores.humidade);
-  doc["luminosidade"] = sensores.luminosidade;
-  doc["pessoas"] = pessoas.total;
+  doc["luminosidade"] = sensores.luminosidade != 0 ? sensores.luminosidade : 0;
+  doc["ldr"] = sensores.valorLDR != 0 ? sensores.valorLDR : 0;
+  doc["pessoas"] = pessoas.total != 0 ? pessoas.total : 0;
   doc["timestamp"] = millis();
   doc["dados_validos"] = sensores.dadosValidos;
 
@@ -829,7 +831,7 @@ void enviarDadosImediato() {
   c["modo_manual_clima"] = flags.modoManualClima;
 
   doc["modo_manual_ilum"] = flags.modoManualIlum;
-  doc["valor_ldr"] = sensores.valorLDR;
+  doc["valor_ldr"] = sensores.valorLDR != 0 ? sensores.valorLDR : 0;
 
   String dados;
   serializeJson(doc, dados);

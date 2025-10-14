@@ -107,12 +107,17 @@ class DatabaseConnection {
       }
 
       // Tabela de dados históricos dos sensores (para Power BI)
+      // Adicionamos colunas ldr (valor bruto do sensor) e intensidade_luzes
+      // (nível percentual das luzes ligadas) separadas da leitura de
+      // luminosidade ambiente.
       await _connection!.query('''
         CREATE TABLE IF NOT EXISTS dados_historicos (
           id INT AUTO_INCREMENT PRIMARY KEY,
           temperatura FLOAT,
           humidade FLOAT,
           luminosidade INT,
+          ldr INT,
+          intensidade_luzes INT,
           pessoas INT DEFAULT 0,
           tags_presentes JSON,
           clima_ligado BOOLEAN DEFAULT FALSE,
@@ -123,6 +128,31 @@ class DatabaseConnection {
           timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       ''');
+
+      // Migração silenciosa para bases antigas: garantir colunas ldr e intensidade_luzes
+      try {
+        await _connection!.query(
+          "ALTER TABLE dados_historicos ADD COLUMN IF NOT EXISTS ldr INT",
+        );
+      } catch (_) {
+        try {
+          await _connection!.query(
+            "ALTER TABLE dados_historicos ADD COLUMN ldr INT",
+          );
+        } catch (_) {}
+      }
+
+      try {
+        await _connection!.query(
+          "ALTER TABLE dados_historicos ADD COLUMN IF NOT EXISTS intensidade_luzes INT",
+        );
+      } catch (_) {
+        try {
+          await _connection!.query(
+            "ALTER TABLE dados_historicos ADD COLUMN intensidade_luzes INT",
+          );
+        } catch (_) {}
+      }
 
       // Tabela de preferências por tag NFC (cache local para performance)
       await _connection!.query('''

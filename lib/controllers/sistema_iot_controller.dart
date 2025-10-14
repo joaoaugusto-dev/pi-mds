@@ -132,6 +132,14 @@ class SistemaIotController {
       _ultimasTags = List.from(novosDados.tags);
 
       // Salvar no histórico MySQL para Power BI
+      // Determinar intensidade das luzes a ser salva: preferir comando atual
+      int intensidadeASalvar;
+      if (_comandoIluminacaoAtual != 'auto') {
+        intensidadeASalvar = int.tryParse(_comandoIluminacaoAtual) ?? novosDados.luminosidade;
+      } else {
+        intensidadeASalvar = novosDados.luminosidade;
+      }
+
       await historicoDao.salvarDadosHistoricos(
         novosDados,
         climaLigado: _ultimoEstadoClima?.ligado,
@@ -139,6 +147,7 @@ class SistemaIotController {
         climaVelocidade: _ultimoEstadoClima?.velocidade,
         modoManualIlum: _modoManualIluminacao,
         modoManualClima: _modoManualClimatizador,
+        intensidadeLuzes: intensidadeASalvar,
       );
 
       // Aplicar automação se não estiver em modo manual
