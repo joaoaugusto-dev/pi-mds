@@ -11,7 +11,6 @@ import '../models/log_entry.dart';
 import '../utils/console.dart';
 import '../models/dados_sensores.dart';
 import '../models/estado_climatizador.dart';
-import '../models/preferencia_tag.dart';
 import '../models/preferencias_grupo.dart';
 
 // Funções utilitárias (removidas as não utilizadas para simplificar o arquivo)
@@ -257,9 +256,29 @@ class MenuInterface {
                   .padLeft(5) +
               '%'
         : '  N/A';
-    final lumi = sensores != null && sensores['luminosidade'] != null
-        ? sensores['luminosidade'].toString().padLeft(3) + '%'
-        : 'N/A';
+    // Luminosidade do sensor LDR
+    int? lumiVal;
+    if (sensores != null) {
+      if (sensores.containsKey('luminosidade') &&
+          sensores['luminosidade'] != null) {
+        var v = sensores['luminosidade'];
+        if (v is num)
+          lumiVal = v.toInt();
+        else if (v is String)
+          lumiVal = int.tryParse(v) ?? 0;
+      }
+    }
+    // Se não houver valor no payload, tentar obter do controller (última leitura tipada)
+    if (lumiVal == null) {
+      try {
+        final obj = sistemaController.ultimaSensorData;
+        if (obj != null) {
+          lumiVal = obj.luminosidade;
+        }
+      } catch (_) {}
+    }
+
+    final lumi = lumiVal != null ? lumiVal.toString().padLeft(3) + '%' : 'N/A';
     final pessoas = sensores != null && sensores['pessoas'] != null
         ? sensores['pessoas'].toString().padLeft(2)
         : ' 0';
@@ -294,7 +313,7 @@ class MenuInterface {
     // linha de sensores
     print(
       _padInner(
-        '🌡 Temperatura: ${dados.temperatura.toStringAsFixed(1)}°C   💧 Umidade: ${dados.humidade.toStringAsFixed(1)}%   💡 Luminosidade: ${dados.luminosidade}%   👥 Pessoas: ${dados.pessoas}',
+        '🌡 Temperatura: ${dados.temperatura.toStringAsFixed(1)}°C   💧 Umidade: ${dados.humidade.toStringAsFixed(1)}%   💡 Luz: ${dados.luminosidade}%   👥 Pessoas: ${dados.pessoas}',
       ),
     );
 
@@ -544,20 +563,8 @@ class MenuInterface {
 
       if (sucesso) {
         // Salvar preferência individual no cache MySQL para uso imediato
-        try {
-          PreferenciaTag pref = PreferenciaTag(
-            tag: novoFunc.tagNfc ?? '',
-            nomeCompleto: novoFunc.nomeCompleto,
-            temperaturaPreferida: novoFunc.tempPreferida,
-            luminosidadePreferida: novoFunc.lumiPreferida,
-          );
-          if ((pref.tag).isNotEmpty) {
-            await sistemaController.preferenciaTagDao.salvarPreferencia(pref);
-            print('\n✓ Preferência do usuário salva no cache MySQL');
-          }
-        } catch (e) {
-          print('\n⚠️ Falha ao salvar preferência no cache: $e');
-        }
+        // Preferencias agora estão armazenadas em `funcionarios` (colunas temp_preferida/lumi_preferida).
+        // Não é mais necessário salvar uma cópia em preferencias_tags.
 
         print('\n✅ Funcionário cadastrado com sucesso!');
       } else {
@@ -1284,7 +1291,7 @@ class MenuInterface {
                 if (prefs != null) {
                   nivelPublicar = prefs.luminosidadeUtilizada;
                 } else {
-                  // fallback: usar luminosidade atual dos sensores ou 50
+                  // fallback: usar intensidade atual dos sensores ou 50
                   nivelPublicar = dados.luminosidade > 0
                       ? dados.luminosidade
                       : 50;
@@ -1369,7 +1376,7 @@ class MenuInterface {
         print('📊 Última leitura:');
         print('   Temperatura: ${dados.temperatura}°C');
         print('   Umidade: ${dados.humidade}%');
-        print('   Luminosidade: ${dados.luminosidade}%');
+        print('   Luz: ${dados.luminosidade}%');
         print('   Pessoas: ${dados.pessoas}');
         print('   Tags: ${dados.tags}');
       } else {

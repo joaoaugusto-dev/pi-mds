@@ -3,11 +3,11 @@ import '../services/firebase_service.dart';
 import '../services/funcionario_service.dart';
 import '../services/log_service.dart';
 import '../dao/historico_dao.dart';
-import '../dao/preferencia_tag_dao.dart';
+// import de PreferenciaTagDao removido - preferências agora vêm da tabela `funcionarios`
 import '../models/dados_sensores.dart';
 import '../models/estado_climatizador.dart';
 import '../models/preferencias_grupo.dart';
-import '../models/preferencia_tag.dart';
+// Preferências individuais agora são lidas diretamente da tabela `funcionarios`.
 import '../models/log_entry.dart';
 
 class SistemaIotController {
@@ -15,7 +15,7 @@ class SistemaIotController {
   final FuncionarioService funcionarioService;
   final LogService logService;
   final HistoricoDao historicoDao;
-  final PreferenciaTagDao preferenciaTagDao;
+  // removido cache preferenciaTagDao — preferências vêm de `funcionarios`
 
   // Estados internos
   DadosSensores? _ultimaSensorData;
@@ -41,7 +41,6 @@ class SistemaIotController {
     required this.funcionarioService,
     required this.logService,
     required this.historicoDao,
-    required this.preferenciaTagDao,
   });
 
   // Getters para estado atual
@@ -131,15 +130,14 @@ class SistemaIotController {
       _ultimaSensorData = novosDados;
       _ultimasTags = List.from(novosDados.tags);
 
-      // Salvar no histórico MySQL para Power BI
-      // Determinar intensidade das luzes a ser salva: preferir comando atual
-      int intensidadeASalvar;
-      if (_comandoIluminacaoAtual != 'auto') {
-        intensidadeASalvar = int.tryParse(_comandoIluminacaoAtual) ?? novosDados.luminosidade;
-      } else {
-        intensidadeASalvar = novosDados.luminosidade;
+      // Converter comando de iluminação para int (0, 25, 50, 75, 100)
+      // Se não houver tags (ninguém presente), salvar 0
+      int iluminacaoArtificial = 0;
+      if (novosDados.tags.isNotEmpty && _comandoIluminacaoAtual != 'auto') {
+        iluminacaoArtificial = int.tryParse(_comandoIluminacaoAtual) ?? 0;
       }
 
+      // Salvar no histórico MySQL para Power BI
       await historicoDao.salvarDadosHistoricos(
         novosDados,
         climaLigado: _ultimoEstadoClima?.ligado,
@@ -147,7 +145,7 @@ class SistemaIotController {
         climaVelocidade: _ultimoEstadoClima?.velocidade,
         modoManualIlum: _modoManualIluminacao,
         modoManualClima: _modoManualClimatizador,
-        intensidadeLuzes: intensidadeASalvar,
+        iluminacaoArtificial: iluminacaoArtificial,
       );
 
       // Aplicar automação se não estiver em modo manual
@@ -159,170 +157,15 @@ class SistemaIotController {
     }
   }
 
-  // Processar estado do climatizador
-  Future<void> processarEstadoClimatizador() async {
-    EstadoClimatizador? novoEstado = await firebaseService.lerClimatizador();
-
-    if (novoEstado != null) {
-      _ultimoEstadoClima = novoEstado;
-      _log('✓ Estado climatizador: $novoEstado');
-    }
-  }
-
-  // Processar solicitação de preferências: buscar no MySQL e calcular médias em Dart.
-  // Retorna um objeto PreferenciasGrupo (ou null em caso de erro).
-  Future<PreferenciasGrupo?> processarSolicitacaoPreferencias(
-    List<String> tags,
-  ) async {
-    if (tags.isEmpty) return null;
-
-    _log(
-      '\ud83d\udccb Processando preferências (MySQL) para tags: ${tags.join(', ')}',
-    );
-
-    try {
-      // Buscar preferências individuais diretamente no MySQL (cache local)
-      List<PreferenciaTag> preferencias = await preferenciaTagDao
-          .buscarMultiplasTags(tags);
-
-      // Mapear tags encontradas
-      var encontrados = <String, PreferenciaTag>{};
-      for (var p in preferencias) {
-        encontrados[p.tag] = p;
-      }
-
-      List<String> tagsDesconhecidas = [];
-      List<Map<String, dynamic>> funcionariosPresentes = [];
-
-      double somaTemp = 0.0;
-      int somaLum = 0;
-      int countTemp = 0;
-      int countLum = 0;
-
-      for (String tag in tags) {
-        if (encontrados.containsKey(tag)) {
-          var pref = encontrados[tag]!;
-          // Considerar apenas valores válidos
-          if (pref.temperaturaPreferida >= 16 &&
-              pref.temperaturaPreferida <= 32) {
-            somaTemp += pref.temperaturaPreferida;
-            countTemp++;
-          }
-          if (pref.luminosidadePreferida >= 0 &&
-              pref.luminosidadePreferida <= 100) {
-            somaLum += pref.luminosidadePreferida;
-            countLum++;
-          }
-
-          funcionariosPresentes.add({
-            'nome': pref.nomeCompleto,
-            'tag_nfc': pref.tag,
-            'temp_preferida': pref.temperaturaPreferida,
-            'lumi_preferida': pref.luminosidadePreferida,
-          });
-        } else {
-          // Tag não encontrada no cache; tentar derivar do cadastro de funcionário
-          var func = await funcionarioService.buscarPorTag(tag);
-          if (func != null) {
-            // Criar preferencia a partir do funcionário e salvar no MySQL para cache
-            PreferenciaTag pref = PreferenciaTag(
-              tag: tag,
-              nomeCompleto: func.nomeCompleto,
-              temperaturaPreferida: func.tempPreferida,
-              luminosidadePreferida: func.lumiPreferida.round(),
-            );
-            await preferenciaTagDao.salvarPreferencia(pref);
-
-            // contabilizar
-            if (pref.temperaturaPreferida >= 16 &&
-                pref.temperaturaPreferida <= 32) {
-              somaTemp += pref.temperaturaPreferida;
-              countTemp++;
-            }
-            if (pref.luminosidadePreferida >= 0 &&
-                pref.luminosidadePreferida <= 100) {
-              somaLum += pref.luminosidadePreferida;
-              countLum++;
-            }
-
-            funcionariosPresentes.add({
-              'nome': pref.nomeCompleto,
-              'tag_nfc': pref.tag,
-              'temp_preferida': pref.temperaturaPreferida,
-              'lumi_preferida': pref.luminosidadePreferida,
-            });
-          } else {
-            // Tag realmente desconhecida: criar preferência padrão e salvar
-            PreferenciaTag pref = PreferenciaTag(
-              tag: tag,
-              nomeCompleto: 'Usuário $tag',
-              temperaturaPreferida: 25.0,
-              luminosidadePreferida: 50,
-            );
-            await preferenciaTagDao.salvarPreferencia(pref);
-            tagsDesconhecidas.add(tag);
-
-            // contar como padrão
-            somaTemp += pref.temperaturaPreferida;
-            countTemp++;
-            somaLum += pref.luminosidadePreferida;
-            countLum++;
-
-            funcionariosPresentes.add({
-              'nome': pref.nomeCompleto,
-              'tag_nfc': pref.tag,
-              'temp_preferida': pref.temperaturaPreferida,
-              'lumi_preferida': pref.luminosidadePreferida,
-            });
-          }
-        }
-      }
-
-      double temperaturaMedia = countTemp > 0 ? somaTemp / countTemp : 25.0;
-      double luminosidadeMedia = countLum > 0 ? somaLum / countLum : 50.0;
-
-      int luminosidadeUtilizada = _nivelValido(luminosidadeMedia);
-
-      if (tagsDesconhecidas.isNotEmpty) {
-        _log('⚠ Tags desconhecidas: ${tagsDesconhecidas.join(', ')}');
-      }
-
-      var preferenciasGrupo = PreferenciasGrupo(
-        tagsPresentes: tags,
-        temperaturaMedia: temperaturaMedia,
-        luminosidadeMedia: luminosidadeMedia,
-        luminosidadeUtilizada: luminosidadeUtilizada,
-        funcionariosPresentes: funcionariosPresentes,
-        tagsDesconhecidas: tagsDesconhecidas,
-      );
-
-      _log(
-        '✓ Preferências calculadas localmente: Temp=${temperaturaMedia.toStringAsFixed(1)}°C, Lumi=${luminosidadeUtilizada}%',
-      );
-
-      // Publicar preferências do grupo no Firebase para comunicação com o ESP
-      try {
-        await firebaseService.salvarPreferenciasGrupo(
-          preferenciasGrupo.toJson(),
-        );
-        _log('✓ Preferências do grupo publicadas no Firebase para o ESP');
-      } catch (_) {
-        _log('⚠ Falha ao publicar preferências no Firebase (não crítico)');
-      }
-
-      // IMPORTANT: Não salvamos preferências de grupo no Firebase. Firebase será usado
-      // somente para comunicação (comandos/leituras). Todas preferências estão no MySQL.
-
-      return preferenciasGrupo;
-    } catch (e) {
-      _log('✗ Erro ao processar preferências (MySQL): $e');
-      return null;
-    }
-  }
-
   // Aplicar automação baseada em preferências
   Future<void> _aplicarAutomacao(DadosSensores dados) async {
-    if (dados.tags.isEmpty) return;
+    if (dados.tags.isEmpty) {
+      // Sem pessoas: desligar iluminação
+      if (!_modoManualIluminacao) {
+        await _aplicarAutomacaoIluminacao(0);
+      }
+      return;
+    }
 
     // Processar preferências primeiro (MySQL/Dart)
     PreferenciasGrupo? preferencias = await processarSolicitacaoPreferencias(
@@ -348,6 +191,50 @@ class SistemaIotController {
         dados.temperatura,
         preferencias.temperaturaMedia!,
       );
+    }
+  }
+
+  // Processar solicitações de preferências: busca e cálculo via FuncionarioService
+  Future<PreferenciasGrupo?> processarSolicitacaoPreferencias(
+    List<String> tags,
+  ) async {
+    if (tags.isEmpty) return null;
+
+    _log(
+      '\ud83d\udccb Processando preferencias via tabela funcionarios para tags: ${tags.join(', ')}',
+    );
+
+    try {
+      PreferenciasGrupo prefs = await funcionarioService
+          .calcularPreferenciasGrupo(tags);
+
+      // Publicar no Firebase para comunicação com o ESP
+      try {
+        await firebaseService.salvarPreferenciasGrupo(prefs.toJson());
+        _log('\u2713 Preferencias do grupo publicadas no Firebase para o ESP');
+      } catch (_) {
+        _log(
+          '\u26a0 Falha ao publicar preferencias no Firebase (n\u00e3o crítico)',
+        );
+      }
+
+      return prefs;
+    } catch (e) {
+      _log('\u2717 Erro ao processar preferencias via funcionarios: $e');
+      return null;
+    }
+  }
+
+  // Processar estado do climatizador (ler Firebase)
+  Future<void> processarEstadoClimatizador() async {
+    try {
+      EstadoClimatizador? novoEstado = await firebaseService.lerClimatizador();
+      if (novoEstado != null) {
+        _ultimoEstadoClima = novoEstado;
+        _log('\u2713 Estado climatizador: $novoEstado');
+      }
+    } catch (e) {
+      _log('✗ Erro ao ler estado climatizador: $e');
     }
   }
 
@@ -503,22 +390,7 @@ class SistemaIotController {
   }
 
   // Função auxiliar para 'snapping' de luminosidade para múltiplos de 25
-  int _nivelValido(double media) {
-    if (media == 0) return 0;
-    const niveis = [0, 25, 50, 75, 100];
-
-    int nivelMaisProximo = niveis[0];
-    double menorDiferenca = (media - niveis[0]).abs();
-
-    for (int i = 1; i < niveis.length; i++) {
-      double diferenca = (media - niveis[i]).abs();
-      if (diferenca < menorDiferenca) {
-        menorDiferenca = diferenca;
-        nivelMaisProximo = niveis[i];
-      }
-    }
-    return nivelMaisProximo;
-  }
+  // _nivelValido está implementado em FuncionarioService e usado onde necessário.
 
   // Stream de dados em tempo real - intervalo maior para dashboard mais estável
   Stream<Map<String, dynamic>> streamDadosTempoReal() async* {

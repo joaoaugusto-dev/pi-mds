@@ -3,7 +3,6 @@ import 'package:pi_mds/database/database_connection.dart';
 import 'package:pi_mds/dao/funcionario_dao.dart';
 import 'package:pi_mds/dao/log_dao.dart';
 import 'package:pi_mds/dao/historico_dao.dart';
-import 'package:pi_mds/dao/preferencia_tag_dao.dart';
 import 'package:pi_mds/services/firebase_service.dart';
 import 'package:pi_mds/services/funcionario_service.dart';
 import 'package:pi_mds/services/saida_service.dart';
@@ -32,7 +31,7 @@ Future<void> main() async {
     FuncionarioDao funcionarioDao = FuncionarioDao(dbConnection);
     LogDao logDao = LogDao(dbConnection);
     HistoricoDao historicoDao = HistoricoDao(dbConnection);
-    PreferenciaTagDao preferenciaTagDao = PreferenciaTagDao(dbConnection);
+    // PreferenciaTagDao removed: preferências ler-se-ão diretamente da tabela `funcionarios`.
 
     print('🔧 Inicializando Services...');
     SaidaService saidaService = SaidaService(capacidade: 500);
@@ -52,7 +51,6 @@ Future<void> main() async {
       funcionarioService: funcionarioService,
       logService: logService,
       historicoDao: historicoDao,
-      preferenciaTagDao: preferenciaTagDao,
     );
 
     await sistemaController.inicializar();

@@ -13,24 +13,28 @@ class HistoricoDao {
     int? climaVelocidade,
     bool? modoManualIlum,
     bool? modoManualClima,
-    int? intensidadeLuzes,
+    int? iluminacaoArtificial,
   }) async {
     try {
       final conn = db.connection;
       if (conn != null) {
+        // Inserir na ordem solicitada: temperatura, humidade, ldr,
+        // iluminacao_artificial, pessoas, tags_qtd, tags_presentes, clima_ligado,
+        // clima_umidificando, clima_velocidade, modo_manual_ilum, modo_manual_clima
+        int tagsQtd = dados.tags.length;
         await conn.query(
           '''INSERT INTO dados_historicos 
-             (temperatura, humidade, luminosidade, ldr, intensidade_luzes, pessoas, tags_presentes, 
-              clima_ligado, clima_umidificando, clima_velocidade, 
-              modo_manual_ilum, modo_manual_clima) 
+             (temperatura, humidade, ldr, iluminacao_artificial, pessoas,
+              tags_qtd, tags_presentes, clima_ligado, clima_umidificando,
+              clima_velocidade, modo_manual_ilum, modo_manual_clima)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
           [
             dados.temperatura,
             dados.humidade,
-            dados.luminosidade,
             dados.ldr,
-            intensidadeLuzes ?? dados.luminosidade,
+            iluminacaoArtificial ?? dados.iluminacaoArtificial,
             dados.pessoas,
+            tagsQtd,
             dados.tags.isEmpty
                 ? '[]'
                 : '[${dados.tags.map((tag) => '"$tag"').join(',')}]',
@@ -59,7 +63,7 @@ class HistoricoDao {
       if (conn == null) return historico;
 
       String query = '''
-        SELECT id, temperatura, humidade, luminosidade, ldr, intensidade_luzes, pessoas, tags_presentes,
+        SELECT id, temperatura, humidade, ldr, iluminacao_artificial, pessoas, tags_qtd, tags_presentes,
                clima_ligado, clima_umidificando, clima_velocidade,
                modo_manual_ilum, modo_manual_clima, timestamp
         FROM dados_historicos
@@ -82,10 +86,10 @@ class HistoricoDao {
           'id': row[0],
           'temperatura': row[1],
           'humidade': row[2],
-          'luminosidade': row[3],
-          'ldr': row[4],
-          'intensidade_luzes': row[5],
-          'pessoas': row[6],
+          'ldr': row[3],
+          'iluminacao_artificial': row[4],
+          'pessoas': row[5],
+          'tags_qtd': row[6],
           'tags_presentes': row[7],
           'clima_ligado': row[8],
           'clima_umidificando': row[9],
@@ -108,10 +112,10 @@ class HistoricoDao {
     Map<String, double> medias = {
       'temperatura': 0.0,
       'humidade': 0.0,
-      'luminosidade': 0.0,
       'ldr': 0.0,
-      'intensidade_luzes': 0.0,
       'pessoas': 0.0,
+      'iluminacao_artificial': 0.0,
+      'tags_qtd': 0.0,
     };
 
     try {
@@ -121,10 +125,10 @@ class HistoricoDao {
       String query = '''
         SELECT AVG(temperatura) as temp_media, 
                AVG(humidade) as hum_media,
-               AVG(luminosidade) as lumi_media,
                AVG(ldr) as ldr_media,
-               AVG(intensidade_luzes) as intensidade_media,
-               AVG(pessoas) as pessoas_media
+               AVG(pessoas) as pessoas_media,
+               AVG(iluminacao_artificial) as ilum_media,
+               AVG(tags_qtd) as tags_qtd_media
         FROM dados_historicos
       ''';
 
@@ -141,10 +145,10 @@ class HistoricoDao {
         var row = result.first;
         medias['temperatura'] = (row[0] as num?)?.toDouble() ?? 0.0;
         medias['humidade'] = (row[1] as num?)?.toDouble() ?? 0.0;
-        medias['luminosidade'] = (row[2] as num?)?.toDouble() ?? 0.0;
-        medias['ldr'] = (row[3] as num?)?.toDouble() ?? 0.0;
-        medias['intensidade_luzes'] = (row[4] as num?)?.toDouble() ?? 0.0;
-        medias['pessoas'] = (row[5] as num?)?.toDouble() ?? 0.0;
+        medias['ldr'] = (row[2] as num?)?.toDouble() ?? 0.0;
+        medias['pessoas'] = (row[3] as num?)?.toDouble() ?? 0.0;
+        medias['iluminacao_artificial'] = (row[4] as num?)?.toDouble() ?? 0.0;
+        medias['tags_qtd'] = (row[5] as num?)?.toDouble() ?? 0.0;
       }
     } catch (e) {
       print("✗ Erro ao calcular médias históricas: $e");

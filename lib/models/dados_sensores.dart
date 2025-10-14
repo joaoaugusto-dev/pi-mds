@@ -7,6 +7,7 @@ class DadosSensores {
   List<String> tags;
   DateTime timestamp;
   bool dadosValidos;
+  int iluminacaoArtificial; // Iluminação artificial (0, 25, 50, 75, 100)
 
   DadosSensores({
     required this.temperatura,
@@ -17,6 +18,7 @@ class DadosSensores {
     required this.tags,
     required this.timestamp,
     this.dadosValidos = true,
+    this.iluminacaoArtificial = 0,
   });
 
   factory DadosSensores.fromJson(Map<String, dynamic> json) {
@@ -31,6 +33,7 @@ class DadosSensores {
           ? DateTime.fromMillisecondsSinceEpoch(json['timestamp'])
           : DateTime.now(),
       dadosValidos: json['dadosValidos'] ?? true,
+      iluminacaoArtificial: json['iluminacao_artificial']?.toInt() ?? 0,
     );
   }
 
@@ -44,6 +47,7 @@ class DadosSensores {
       'tags': tags,
       'timestamp': timestamp.millisecondsSinceEpoch,
       'dadosValidos': dadosValidos,
+      'iluminacao_artificial': iluminacaoArtificial,
     };
   }
 
@@ -54,6 +58,7 @@ class DadosSensores {
     int? climaVelocidade,
     bool? modoManualIlum,
     bool? modoManualClima,
+    int? iluminacaoArtificial,
   }) {
     return {
       'temperatura': temperatura,
@@ -67,6 +72,8 @@ class DadosSensores {
       'clima_velocidade': climaVelocidade ?? 0,
       'modo_manual_ilum': modoManualIlum ?? false,
       'modo_manual_clima': modoManualClima ?? false,
+      'iluminacao_artificial':
+          iluminacaoArtificial ?? this.iluminacaoArtificial,
     };
   }
 

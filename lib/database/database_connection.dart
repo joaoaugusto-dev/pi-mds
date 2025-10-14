@@ -107,18 +107,19 @@ class DatabaseConnection {
       }
 
       // Tabela de dados históricos dos sensores (para Power BI)
-      // Adicionamos colunas ldr (valor bruto do sensor) e intensidade_luzes
-      // (nível percentual das luzes ligadas) separadas da leitura de
-      // luminosidade ambiente.
+      // Ordem de colunas desejada:
+      // id, temperatura, humidade, ldr, iluminacao_artificial, pessoas,
+      // tags_qtd, tags_presentes, clima_ligado, clima_umidificando,
+      // clima_velocidade, modo_manual_ilum, modo_manual_clima, timestamp
       await _connection!.query('''
         CREATE TABLE IF NOT EXISTS dados_historicos (
           id INT AUTO_INCREMENT PRIMARY KEY,
           temperatura FLOAT,
           humidade FLOAT,
-          luminosidade INT,
           ldr INT,
-          intensidade_luzes INT,
+          iluminacao_artificial INT DEFAULT 0,
           pessoas INT DEFAULT 0,
+          tags_qtd INT DEFAULT 0,
           tags_presentes JSON,
           clima_ligado BOOLEAN DEFAULT FALSE,
           clima_umidificando BOOLEAN DEFAULT FALSE,
@@ -129,43 +130,8 @@ class DatabaseConnection {
         )
       ''');
 
-      // Migração silenciosa para bases antigas: garantir colunas ldr e intensidade_luzes
-      try {
-        await _connection!.query(
-          "ALTER TABLE dados_historicos ADD COLUMN IF NOT EXISTS ldr INT",
-        );
-      } catch (_) {
-        try {
-          await _connection!.query(
-            "ALTER TABLE dados_historicos ADD COLUMN ldr INT",
-          );
-        } catch (_) {}
-      }
-
-      try {
-        await _connection!.query(
-          "ALTER TABLE dados_historicos ADD COLUMN IF NOT EXISTS intensidade_luzes INT",
-        );
-      } catch (_) {
-        try {
-          await _connection!.query(
-            "ALTER TABLE dados_historicos ADD COLUMN intensidade_luzes INT",
-          );
-        } catch (_) {}
-      }
-
-      // Tabela de preferências por tag NFC (cache local para performance)
-      await _connection!.query('''
-        CREATE TABLE IF NOT EXISTS preferencias_tags (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          tag_nfc VARCHAR(50) UNIQUE NOT NULL,
-          nome_completo VARCHAR(150),
-          temperatura_preferida FLOAT DEFAULT 25.0,
-          luminosidade_preferida INT DEFAULT 50,
-          ultima_atualizacao TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          INDEX idx_tag_nfc (tag_nfc)
-        )
-      ''');
+      // NOTE: A tabela 'preferencias_tags' foi removida. Preferências agora
+      // residem diretamente na tabela `funcionarios` (colunas temp_preferida/lumi_preferida).
 
       print("✓ Tabelas criadas/verificadas com sucesso!");
     } catch (e) {
