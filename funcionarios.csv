@@ -1,5 +1,0 @@
-id,matricula,nome,sobrenome,senha,temp_preferida,lumi_preferida,tag_nfc,createdAt,updatedAt
-1,25000019,João Augusto,Freitas,123,18,25,8E0F3503,2025-10-14 14:18:47,2025-10-14 14:18:47
-2,25000795,Kauan,Leander Leandrini,123,30,75,6C227B1C,2025-10-14 14:18:47,2025-10-14 14:18:47
-3,25001248,Everson,Chagas Araújo,123,22,50,AC71771C,2025-10-14 14:18:47,2025-10-14 14:18:47
-4,25001227,Isadora,Cabral dos Santos,123,26,100,8CE3721C,2025-10-14 14:18:47,2025-10-14 14:18:47
