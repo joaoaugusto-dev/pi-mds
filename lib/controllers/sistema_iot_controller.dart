@@ -1,3 +1,4 @@
+import 'dart:convert';
 import '../services/firebase_service.dart';
 import '../services/funcionario_service.dart';
 import '../services/log_service.dart';
@@ -49,6 +50,43 @@ class SistemaIotController {
   bool get modoManualIluminacao => _modoManualIluminacao;
   bool get modoManualClimatizador => _modoManualClimatizador;
   String get comandoIluminacaoAtual => _comandoIluminacaoAtual;
+
+  // Processar solicitações de preferências do ESP32
+  Future<void> processarSolicitacoesPreferenciasESP() async {
+    try {
+      String? requestData = await firebaseService.lerPreferenciasRequest();
+
+      if (requestData != null &&
+          requestData.isNotEmpty &&
+          requestData != 'null') {
+        _log('📨 Solicitação de preferências recebida do ESP32');
+
+        // Parse da solicitação
+        Map<String, dynamic> requestJson = jsonDecode(requestData);
+        List<String> tags = List<String>.from(requestJson['tags'] ?? []);
+
+        if (tags.isNotEmpty) {
+          // Calcular preferências
+          PreferenciasGrupo? prefs = await processarSolicitacaoPreferencias(
+            tags,
+          );
+
+          if (prefs != null) {
+            // Publicar resposta no Firebase para o ESP32 ler
+            await firebaseService.salvarPreferenciasGrupo(prefs.toJson());
+            _log(
+              '✓ Preferências respondidas para ESP32: Temp=${prefs.temperaturaMedia?.toStringAsFixed(1)}°C, Lum=${prefs.luminosidadeUtilizada}%',
+            );
+          }
+        }
+
+        // Limpar a solicitação processada
+        await firebaseService.limparPreferenciasRequest();
+      }
+    } catch (e) {
+      _log('✗ Erro ao processar solicitação de preferências: $e');
+    }
+  }
 
   // Processar dados dos sensores vindos do Firebase
   Future<void> processarDadosSensores() async {
@@ -429,6 +467,9 @@ class SistemaIotController {
     () async {
       while (_bgRunning) {
         try {
+          // Processar solicitações de preferências do ESP32 primeiro
+          await processarSolicitacoesPreferenciasESP();
+
           // Processar dados e estado — estes métodos usam _log(), que respeita 'verbose'
           await processarDadosSensores();
           await processarEstadoClimatizador();

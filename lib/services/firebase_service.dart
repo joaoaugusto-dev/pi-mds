@@ -17,7 +17,11 @@ class FirebaseService {
   }) : _saidaService = saidaService;
 
   String _buildUrl(String path) {
-    String url = '$baseUrl$path.json';
+    // Ensure we don't produce double slashes when baseUrl ends with '/'
+    // and path begins with '/'. Firebase accepts both, but normalizing
+    // helps avoid subtle issues and makes logs clearer.
+    String p = path.startsWith('/') ? path.substring(1) : path;
+    String url = '${baseUrl.endsWith('/') ? baseUrl : baseUrl + '/'}$p.json';
     if (authToken.isNotEmpty) {
       url += '?auth=$authToken';
     }
@@ -252,20 +256,73 @@ class FirebaseService {
     }
   }
 
+  // Ler solicitação de preferências do ESP32
+  Future<String?> lerPreferenciasRequest() async {
+    try {
+      final url = Uri.parse(_buildUrl('/preferencias_request'));
+      final response = await http.get(url);
+
+      if (response.statusCode == 200 && response.body != 'null') {
+        return response.body;
+      }
+    } catch (e) {
+      print('✗ Erro ao ler preferencias_request Firebase: $e');
+    }
+    return null;
+  }
+
+  // Limpar /preferencias_request após processamento
+  Future<bool> limparPreferenciasRequest() async {
+    try {
+      final url = Uri.parse(_buildUrl('/preferencias_request'));
+      final response = await http.delete(url);
+      return response.statusCode == 200;
+    } catch (e) {
+      print('✗ Erro ao limpar preferencias_request: $e');
+      return false;
+    }
+  }
+
   // Salvar preferências de grupo calculadas (comunicação para o ESP)
   Future<bool> salvarPreferenciasGrupo(
     Map<String, dynamic> preferencias,
   ) async {
     try {
-      final url = Uri.parse(_buildUrl(FirebaseConfig.preferenciasGrupoPath));
+      final urlStr = _buildUrl(FirebaseConfig.preferenciasGrupoPath);
+      final url = Uri.parse(urlStr);
+      final body = jsonEncode(preferencias);
+      final msgEnviar = '⚠ Enviando preferencias_grupo para Firebase: $urlStr';
+      final msgPayload = '⚠ Payload: $body';
+      if (_saidaService != null) {
+        _saidaService!.adicionar(msgEnviar);
+        _saidaService!.adicionar(msgPayload);
+      } else {
+        print(msgEnviar);
+        print(msgPayload);
+      }
+
       final response = await http.put(
         url,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(preferencias),
+        body: body,
       );
-      return response.statusCode == 200;
+
+      final msgResp =
+          '✓ Resposta Firebase (preferencias_grupo): HTTP ${response.statusCode} - ${response.body}';
+      if (_saidaService != null) {
+        _saidaService!.adicionar(msgResp);
+      } else {
+        print(msgResp);
+      }
+
+      return response.statusCode == 200 || response.statusCode == 204;
     } catch (e) {
-      print('✗ Erro ao salvar preferências grupo no Firebase: $e');
+      final msgErr = '✗ Erro ao salvar preferências grupo no Firebase: $e';
+      if (_saidaService != null) {
+        _saidaService!.adicionar(msgErr);
+      } else {
+        print(msgErr);
+      }
       return false;
     }
   }
