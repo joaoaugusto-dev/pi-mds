@@ -13,9 +13,10 @@ import '../models/dados_sensores.dart';
 import '../models/estado_climatizador.dart';
 import '../models/preferencias_grupo.dart';
 
-// Funções utilitárias (removidas as não utilizadas para simplificar o arquivo)
-
 class MenuInterface {
+  // Constantes de layout para interface consistente
+  static const int _larguraPadrao = 86;
+
   final FuncionarioService funcionarioService;
   final LogService logService;
   final FirebaseService firebaseService;
@@ -48,21 +49,29 @@ class MenuInterface {
     _dashboardSubs = sistemaController
         .streamDadosTempoReal()
         .listen((data) {
-          // Limpar algumas linhas para uma atualização mais suave
-          print('\n' * 2);
+          // Espaçamento entre atualizações para não ficar colado
+          print('\n' * 3);
 
           // Imprimir bloco formatado e compacto
-          print('┌${'─' * 70}┐');
+          print(_criarLinhaBorda(inicio: true));
+          final horario = DateTime.now()
+              .toString()
+              .substring(11, 19);
           print(
-            '│ 📊 Dashboard IoT - ${DateTime.now().toString().substring(11, 19).padRight(46)}│',
+            _padInner(
+              '📊 Dashboard IoT - $horario',
+            ),
           );
-          print('├${'─' * 70}┤');
+          print(_criarLinhaBorda(meio: true));
           print(_formatResumoSistema(data));
-          print('├${'─' * 70}┤');
+          print(_criarLinhaBorda(meio: true));
           print(
-            '│ 💡 Pressione ENTER para sair do dashboard${' ' * 25}│',
+            _padInner(
+              '💡 Pressione ENTER para sair do dashboard',
+            ),
           );
-          print('└${'─' * 70}┘');
+          print(_criarLinhaBorda(fim: true));
+          print(''); // Linha extra no final
         });
 
     // Inscrever na stream de teclas (ENTER ou 'q' para sair do dashboard)
@@ -117,13 +126,13 @@ class MenuInterface {
   void _mostrarMenuPrincipal() {
     _mostrarCabecalho();
     print('🏠 MENU PRINCIPAL');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
     print('1. 📊 Dashboard Tempo Real');
     print('2. 👥 Gerenciar Funcionários');
     print('3. 📋 Logs e Relatórios');
     print('4. 🎛️  Controles Manuais');
     print('0. 🚪 Sair');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
   }
 
   Future<void> _processarEscolhaMenu() async {
@@ -166,86 +175,134 @@ class MenuInterface {
     }
   }
 
-  // ignore: unused_element
-  Future<void> _dashboardTempoReal() async {
-    _mostrarCabecalho();
-    print('📊 DASHBOARD TEMPO REAL');
-    print('─' * 70);
-    print(
-      'Pressione Ctrl+C para voltar ao menu principal\n',
-    );
-
-    int contador = 0;
-    while (contador < 10) {
-      // Limitar a 10 atualizações para evitar loop infinito
-      try {
-        // Buscar dados do Firebase
-        DadosSensores? dados =
-            await firebaseService.lerSensores();
-
-        if (dados != null) {
-          // Limpar tela (simples)
-          if (contador > 0) print('\n' * 2);
-
-          // Imprimir um cartão bonito com os dados
-          EstadoClimatizador? clima =
-              sistemaController.ultimoEstadoClima;
-          print('┌${'─' * 70}┐');
-          print(
-            '│ 🔄 Atualização: ${DateTime.now().toString().substring(0, 19).padRight(49)}│',
-          );
-          print('├${'─' * 70}┤');
-          _printDadosCard(dados, clima);
-          print('├${'─' * 70}┤');
-          print(
-            '│ 📱 Status do Sistema: ESP32: ✅  Firebase: ✅  Banco: ${await _verificarStatusBanco()}${' ' * 8}│',
-          );
-          print('└${'─' * 70}┘');
-        } else {
-          print(
-            '⚠️  Aguardando dados do Firebase...',
-          );
-        }
-
-        contador++;
-
-        // Aguardar 3 segundos antes da próxima atualização
-        await Future.delayed(
-          Duration(seconds: 3),
-        );
-      } catch (e) {
-        print(
-          '❌ Erro ao atualizar dashboard: $e',
-        );
-        await Future.delayed(
-          Duration(seconds: 5),
-        );
-        break;
-      }
-    }
-
-    print(
-      '\n📊 Dashboard encerrado. Voltando ao menu...',
-    );
-    await _aguardarTecla();
-  }
-
-  Future<String> _verificarStatusBanco() async {
-    try {
-      await funcionarioService.listarTodos();
-      return '✅ Conectado';
-    } catch (e) {
-      return '❌ Erro';
-    }
-  }
-
   // Helpers de formatação para o dashboard
-  String _padInner(String s) {
-    const int innerWidth = 70;
-    if (s.length > innerWidth - 3) {
-      s = '${s.substring(0, innerWidth - 6)}...';
+  String pad(String s, int w) => (s.length >= w)
+      ? s.substring(0, w)
+      : s + ' ' * (w - s.length);
+
+  // Largura visual aproximada por caractere (em colunas do terminal)
+  int _runeWidth(int rune) {
+    // Zero Width Joiner
+    if (rune == 0x200D) return 0;
+    // Variation Selector-16 (força emoji) conta como +1 (torna 2 no total com o base)
+    if (rune == 0xFE0F) return 1;
+    // Combining marks (largura 0)
+    if ((rune >= 0x0300 && rune <= 0x036F) ||
+        (rune >= 0x1AB0 && rune <= 0x1AFF) ||
+        (rune >= 0x1DC0 && rune <= 0x1DFF) ||
+        (rune >= 0x20D0 && rune <= 0x20FF) ||
+        (rune >= 0xFE20 && rune <= 0xFE2F)) {
+      return 0;
     }
-    return '│ ${s.padRight(innerWidth - 1)}│';
+    // Emojis/símbolos suplementares: largura 2
+    if ((rune >= 0x1F300 && rune <= 0x1FAFF)) {
+      return 2;
+    }
+    // Dingbats e afins (tratamos como 1; com VS-16 vira 2)
+    if (rune >= 0x2600 && rune <= 0x27BF) {
+      return 1;
+    }
+    // Padrão
+    return 1;
+  }
+
+  int _visualWidth(String s) {
+    int w = 0;
+    for (final rune in s.runes) {
+      w += _runeWidth(rune);
+    }
+    return w;
+  }
+
+  String _truncateToWidth(String s, int maxW) {
+    int w = 0;
+    int lastIndex = 0;
+    final runes = s.runes.toList();
+    for (int i = 0; i < runes.length; i++) {
+      final rw = _runeWidth(runes[i]);
+      if (w + rw > maxW) break;
+      w += rw;
+      lastIndex = i + 1;
+    }
+    return String.fromCharCodes(
+      runes.take(lastIndex),
+    );
+  }
+
+  String _padInner(String s) {
+    const int innerWidth =
+        _larguraPadrao -
+        4; // │ espaço ... espaço │
+
+    // Remove códigos ANSI para cálculo correto
+    final textoLimpo = s.replaceAll(
+      RegExp(r'\x1B\[[0-9;]*m'),
+      '',
+    );
+
+    final width = _visualWidth(textoLimpo);
+    String conteudo =
+        s; // Usar texto ORIGINAL para preservar cores
+
+    if (width > innerWidth) {
+      // Se precisar truncar, usar texto limpo
+      final cortado = _truncateToWidth(
+        textoLimpo,
+        innerWidth - 3,
+      );
+      conteudo = cortado + '...';
+    }
+
+    final padSpaces =
+        innerWidth - _visualWidth(textoLimpo);
+    return '│ $conteudo${' ' * padSpaces} │';
+  }
+
+  // Helper para criar linhas de tabela com padding correto
+  String _criarLinhaBorda({
+    bool inicio = false,
+    bool meio = false,
+    bool fim = false,
+  }) {
+    if (inicio)
+      return '┌${'─' * (_larguraPadrao - 2)}┐';
+    if (meio)
+      return '├${'─' * (_larguraPadrao - 2)}┤';
+    if (fim)
+      return '└${'─' * (_larguraPadrao - 2)}┘';
+    return '─' * _larguraPadrao;
+  }
+
+  // Helper para alinhar texto em célula de tabela
+  String _padCelula(
+    String texto,
+    int largura, {
+    String? alinhamento = 'esquerda',
+  }) {
+    // Remove códigos ANSI para cálculo correto do comprimento
+    final textoLimpo = texto.replaceAll(
+      RegExp(r'\x1B\[[0-9;]*m'),
+      '',
+    );
+    final comprimento = textoLimpo.length;
+
+    if (comprimento >= largura) {
+      return texto.substring(0, largura);
+    }
+
+    final espacos = largura - comprimento;
+    if (alinhamento == 'direita') {
+      return ' ' * espacos + texto;
+    } else if (alinhamento == 'centro') {
+      final esquerdaEspacos = espacos ~/ 2;
+      final direitaEspacos =
+          espacos - esquerdaEspacos;
+      return ' ' * esquerdaEspacos +
+          texto +
+          ' ' * direitaEspacos;
+    }
+
+    return texto + ' ' * espacos;
   }
 
   String _formatResumoSistema(
@@ -275,13 +332,13 @@ class MenuInterface {
     final temp =
         sensores != null &&
             sensores['temperatura'] != null
-        ? '${(sensores['temperatura'] as num).toDouble().toStringAsFixed(1).padLeft(5)}°C'
-        : '  N/A';
+        ? '${(sensores['temperatura'] as num).toDouble().toStringAsFixed(1)}°C'
+        : 'N/A';
     final hum =
         sensores != null &&
             sensores['humidade'] != null
-        ? '${(sensores['humidade'] as num).toDouble().toStringAsFixed(1).padLeft(5)}%'
-        : '  N/A';
+        ? '${(sensores['humidade'] as num).toDouble().toStringAsFixed(1)}%'
+        : 'N/A';
     // Luminosidade do sensor LDR
     int? lumiVal;
     if (sensores != null) {
@@ -307,108 +364,69 @@ class MenuInterface {
     }
 
     final lumi = lumiVal != null
-        ? '${lumiVal.toString().padLeft(3)}%'
+        ? '$lumiVal%'
         : 'N/A';
     final pessoas =
         sensores != null &&
             sensores['pessoas'] != null
-        ? sensores['pessoas'].toString().padLeft(
-            2,
-          )
-        : ' 0';
+        ? sensores['pessoas'].toString()
+        : '0';
 
     List<String> lines = [];
-    lines.add(
-      _padInner(
-        '🌡 Temp: $temp   💧 Umid: $hum   💡 Luz: $lumi   👥 Pessoas: $pessoas',
-      ),
-    );
-    lines.add(
-      _padInner(
-        '🏷️  Funcionários: ${tagsStr.padRight(35)}',
-      ),
-    );
 
+    // Linha 1: Sensores principais - deixar _padInner fazer o alinhamento
+    final linha1 =
+        '🌡 Temp: $temp  💧 Umid: $hum  💡 Luz: $lumi  👥 Pessoas: $pessoas';
+    lines.add(_padInner(linha1));
+
+    // Linha 2: Funcionários/Tags
+    final linha2 = '🏷️  Funcionários: $tagsStr';
+    lines.add(_padInner(linha2));
+
+    // Linha 3: Estado do climatizador
     if (climatizador != null) {
       final ligado =
           climatizador['ligado'] == true
-          ? '🟢 LIGADO  '
+          ? '🟢 LIGADO'
           : '🔴 DESLIGADO';
       final vel =
           climatizador['velocidade']
-              ?.toString()
-              .padLeft(2) ??
+              ?.toString() ??
           '-';
       final umid =
           climatizador['umidificando'] == true
           ? 'SIM'
           : 'NÃO';
-      lines.add(
-        _padInner(
-          '❄️  Clima: $ligado   Vent: $vel   Umidif: $umid',
-        ),
-      );
+      final linha3 =
+          '❄️  Clima: $ligado  Vent: $vel  Umidif: $umid';
+      lines.add(_padInner(linha3));
     } else {
       lines.add(
         _padInner(
-          '❄️  Climatizador: 🔴 DESCONECTADO${' ' * 25}',
+          '❄️  Climatizador: 🔴 DESCONECTADO',
         ),
       );
     }
 
-    lines.add(
-      _padInner(
-        '⚙️  Comando Iluminação: ${comandoIlum.toString().toUpperCase()}${' ' * 20}',
-      ),
-    );
+    // Linha 4: Comando de iluminação
+    final linha4 =
+        '⚙️  Comando Iluminação: ${comandoIlum.toString().toUpperCase()}';
+    lines.add(_padInner(linha4));
 
     return lines.join('\n');
-  }
-
-  void _printDadosCard(
-    DadosSensores dados,
-    EstadoClimatizador? clima,
-  ) {
-    // linha de sensores
-    print(
-      _padInner(
-        '🌡 Temperatura: ${dados.temperatura.toStringAsFixed(1)}°C   💧 Umidade: ${dados.humidade.toStringAsFixed(1)}%   💡 Luz: ${dados.luminosidade}%   👥 Pessoas: ${dados.pessoas}',
-      ),
-    );
-
-    // tags
-    print(
-      _padInner(
-        '🏷️  Tags: ${dados.tags.join(', ')}',
-      ),
-    );
-
-    // clima
-    if (clima != null) {
-      final status = clima.ligado
-          ? '🟢 LIGADO'
-          : '🔴 DESLIGADO';
-      print(
-        _padInner(
-          '❄️  Climatizador: $status   Ventilador: Vel. ${clima.velocidade}   Umidificando: ${clima.umidificando ? 'SIM' : 'NÃO'}',
-        ),
-      );
-    } else {
-      print(_padInner('❄️  Climatizador: N/D'));
-    }
   }
 
   Future<void> _menuFuncionarios() async {
     while (true) {
       _mostrarCabecalho();
       print('👥 GERENCIAR FUNCIONÁRIOS');
-      print('─' * 70);
+      print('─' * _larguraPadrao);
       print('1. 📋 Listar Funcionários');
       print('2. ➕ Cadastrar Funcionário');
       print('3. ✏️  Editar Funcionário');
       print('4. 🗑️  Excluir Funcionário');
       print('0. ⬅️  Voltar');
-      print('─' * 70);
+      print('─' * _larguraPadrao);
 
       stdout.write('Escolha uma opção: ');
       String? opcao = await _readLineAsync();
@@ -438,7 +456,7 @@ class MenuInterface {
   Future<void> _listarFuncionarios() async {
     _mostrarCabecalho();
     print('👥 LISTA DE FUNCIONÁRIOS');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
 
     try {
       List<Funcionario> funcionarios =
@@ -453,15 +471,13 @@ class MenuInterface {
           'Total: ${funcionarios.length} funcionário(s) cadastrado(s)\n',
         );
 
-        // Cabeçalho da tabela
+        // Cabeçalho da tabela - ajustado para 80 caracteres
+        print(_criarLinhaBorda(inicio: true));
         print(
-          '┌─────────┬──────────────────────────┬─────────┬─────────┬──────────────┐',
+          '│ Matríc. │ Nome Completo            │ Temp.°C │ Lumi.%  │ Tag NFC        │',
         );
         print(
-          '│ Matríc. │ Nome Completo            │ Temp.°C │ Lumi.%  │ Tag NFC      │',
-        );
-        print(
-          '├─────────┼──────────────────────────┼─────────┼─────────┼──────────────┤',
+          '├─────────┼──────────────────────────┼─────────┼─────────┼────────────────┤',
         );
 
         for (Funcionario func in funcionarios) {
@@ -480,16 +496,14 @@ class MenuInterface {
               .toString()
               .padLeft(7);
           String tag = (func.tagNfc ?? 'N/A')
-              .padRight(12);
+              .padRight(14);
 
           print(
             '│ $matricula │ $nome │ $temp │ $lumi │ $tag │',
           );
         }
 
-        print(
-          '└─────────┴──────────────────────────┴─────────┴─────────┴──────────────┘',
-        );
+        print(_criarLinhaBorda(fim: true));
       }
     } catch (e) {
       print('❌ Erro ao listar funcionários: $e');
@@ -501,7 +515,7 @@ class MenuInterface {
   Future<void> _cadastrarFuncionario() async {
     _mostrarCabecalho();
     print('👤 CADASTRAR NOVO FUNCIONÁRIO');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
 
     try {
       // Coletar dados do funcionário
@@ -718,7 +732,7 @@ class MenuInterface {
   Future<void> _editarFuncionario() async {
     _mostrarCabecalho();
     print('✏️ EDITAR FUNCIONÁRIO');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
 
     try {
       stdout.write(
@@ -833,7 +847,7 @@ class MenuInterface {
   Future<void> _excluirFuncionario() async {
     _mostrarCabecalho();
     print('🗑️ EXCLUIR FUNCIONÁRIO');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
 
     try {
       stdout.write(
@@ -917,7 +931,7 @@ class MenuInterface {
     while (true) {
       _mostrarCabecalho();
       print('📋 LOGS E RELATÓRIOS');
-      print('─' * 70);
+      print('─' * _larguraPadrao);
       print('1. 📊 Logs Recentes');
       print('2. 📈 Relatório Diário');
       print('3. 📅 Relatório por Período');
@@ -926,7 +940,7 @@ class MenuInterface {
         '5. 🗂️ Saídas IoT (mensagens operacionais)',
       );
       print('0. ⬅️  Voltar');
-      print('─' * 70);
+      print('─' * _larguraPadrao);
 
       stdout.write('Escolha uma opção: ');
       String? opcao = await _readLineAsync();
@@ -959,7 +973,7 @@ class MenuInterface {
   Future<void> _mostrarLogsRecentes() async {
     _mostrarCabecalho();
     print('📊 LOGS RECENTES');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
 
     try {
       List<LogEntry> logs = await logService
@@ -974,14 +988,12 @@ class MenuInterface {
           'Total de registros: ${logs.length}',
         );
         print('');
+        print(_criarLinhaBorda(inicio: true));
         print(
-          '┌────────────────────────────────────────────────────────────┐',
+          '│ Tipo    │ Data       │ Hora     │ Matrícula │ Nome do Funcionário    │',
         );
         print(
-          '│ Tipo  │ Data       │ Hora     │ Matrícula │ Nome do Funcionário │',
-        );
-        print(
-          '├───────┼────────────┼──────────┼───────────┼──────────────────────┤',
+          '├─────────┼────────────┼──────────┼───────────┼────────────────────────┤',
         );
 
         for (LogEntry log in logs.take(20)) {
@@ -999,22 +1011,27 @@ class MenuInterface {
               'N/A';
           String tipo = log.tipo.toUpperCase();
           String matricula =
-              (log.matricula ?? 'N/A');
+              (log.matricula ?? 'N/A').padRight(
+                9,
+              );
           String nome =
               (log.nomeCompleto ?? 'N/A');
+          if (nome.length > 22) {
+            nome = '${nome.substring(0, 19)}...';
+          }
+          nome = nome.padRight(22);
 
           // Mostrar tipo colorido
-          String tipoColor = colorTipo(
-            tipo.toLowerCase(),
+          String tipoColor = _padCelula(
+            colorTipo(tipo.toLowerCase()),
+            7,
           );
           print(
-            '│ ${tipoColor.padRight(5 + (tipoColor.length - tipo.length))} │ ${data.padRight(10)} │ ${hora.padRight(8)} │ ${matricula.padRight(9)} │ ${nome.padRight(20)} │',
+            '│ $tipoColor │ ${data.padRight(10)} │ ${hora.padRight(8)} │ $matricula │ $nome │',
           );
         }
 
-        print(
-          '└────────────────────────────────────────────────────────────┘',
-        );
+        print(_criarLinhaBorda(fim: true));
 
         if (logs.length > 20) {
           print(
@@ -1034,7 +1051,7 @@ class MenuInterface {
     print(
       '🗂️ SAÍDAS OPERACIONAIS (IoT) - MODO AO VIVO',
     );
-    print('─' * 70);
+    print('─' * _larguraPadrao);
 
     if (saidaService == null) {
       print(
@@ -1114,7 +1131,7 @@ class MenuInterface {
   Future<void> _relatorioDiario() async {
     _mostrarCabecalho();
     print('📈 RELATÓRIO DIÁRIO');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
 
     try {
       DateTime hoje = DateTime.now();
@@ -1130,7 +1147,7 @@ class MenuInterface {
       print(
         '📅 Data: ${inicioHoje.day.toString().padLeft(2, '0')}/${inicioHoje.month.toString().padLeft(2, '0')}/${inicioHoje.year}',
       );
-      print('─' * 50);
+      print('─' * _larguraPadrao);
 
       List<LogEntry> logs = await logService
           .listarPorPeriodo(inicioHoje, fimHoje);
@@ -1199,7 +1216,7 @@ class MenuInterface {
   Future<void> _relatorioPorPeriodo() async {
     _mostrarCabecalho();
     print('📅 RELATÓRIO POR PERÍODO');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
 
     try {
       print('📅 Digite o período desejado:');
@@ -1332,7 +1349,7 @@ class MenuInterface {
   Future<void> _logsPorFuncionario() async {
     _mostrarCabecalho();
     print('👤 LOGS POR FUNCIONÁRIO');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
 
     try {
       stdout.write(
@@ -1436,7 +1453,7 @@ class MenuInterface {
     while (true) {
       _mostrarCabecalho();
       print('🎛️ CONTROLES MANUAIS');
-      print('─' * 70);
+      print('─' * _larguraPadrao);
       print('1. ❄️  Controlar Climatizador');
       print('2. 💡 Controlar Iluminação');
       print(
@@ -1444,7 +1461,7 @@ class MenuInterface {
       );
       print('4. 🧪 Modo Teste');
       print('0. ⬅️  Voltar');
-      print('─' * 70);
+      print('─' * _larguraPadrao);
 
       stdout.write('Escolha uma opção: ');
       String? opcao = await _readLineAsync();
@@ -1474,7 +1491,7 @@ class MenuInterface {
   Future<void> _controlarClimatizador() async {
     _mostrarCabecalho();
     print('❄️ CONTROLAR CLIMATIZADOR');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
 
     try {
       EstadoClimatizador? estadoAtual =
@@ -1498,8 +1515,11 @@ class MenuInterface {
       print(
         '1. ${estadoAtual?.ligado == true ? "🔴 Desligar" : "🟢 Ligar"}',
       );
-      print('2. 💨 Ajustar Ventilador');
-      print('3. 🌀 Toggle Umidificação');
+      print('2. 💨 Ajustar Velocidade');
+      print('3. 💧 Toggle Umidificação');
+      print('4. ⏲️  Ajustar Timer');
+      print('5. 🔼 Toggle Aleta Vertical');
+      print('6. ↔️  Toggle Aleta Horizontal');
       print('0. ⬅️ Voltar');
 
       stdout.write('Escolha uma opção: ');
@@ -1507,50 +1527,163 @@ class MenuInterface {
 
       switch (opcao) {
         case '1':
+          // Ligar ou desligar climatizador
           bool novoStatus =
               !(estadoAtual?.ligado ?? false);
-          await firebaseService
-              .enviarComandoClimatizador(
-                novoStatus
-                    ? 'ligar:1'
-                    : 'desligar',
+
+          if (novoStatus) {
+            // Se vai ligar, perguntar se quer definir velocidade específica
+            stdout.write(
+              'Deseja definir uma velocidade específica? (1-3, ou ENTER para velocidade padrão): ',
+            );
+            String? velStr =
+                await _readLineAsync();
+            int? velocidade;
+
+            if (velStr != null &&
+                velStr.trim().isNotEmpty) {
+              velocidade = int.tryParse(
+                velStr.trim(),
               );
-          print(
-            '✅ Climatizador ${novoStatus ? "ligado" : "desligado"}!',
-          );
+              if (velocidade != null &&
+                  (velocidade < 1 ||
+                      velocidade > 3)) {
+                print(
+                  '❌ Velocidade inválida (deve ser 1-3)!',
+                );
+                await _aguardarTecla();
+                return;
+              }
+            }
+
+            await sistemaController
+                .enviarComandoClimatizador(
+                  'power_on',
+                  velocidade: velocidade,
+                );
+            String velMsg = velocidade != null
+                ? ' com velocidade $velocidade'
+                : '';
+            print(
+              '✅ Climatizador ligado$velMsg!',
+            );
+          } else {
+            await sistemaController
+                .enviarComandoClimatizador(
+                  'power_off',
+                );
+            print('✅ Climatizador desligado!');
+          }
           break;
 
         case '2':
-          stdout.write(
-            'Velocidade do ventilador (0-3): ',
-          );
-          String? velStr = await _readLineAsync();
-          int? novaVel = int.tryParse(
-            velStr ?? '',
-          );
-          if (novaVel != null &&
-              novaVel >= 0 &&
-              novaVel <= 3) {
-            await firebaseService
-                .enviarComandoClimatizador(
-                  'velocidade:$novaVel',
-                );
+          // Ajustar velocidade
+          if (estadoAtual?.ligado != true) {
             print(
-              '✅ Ventilador ajustado para velocidade $novaVel!',
+              '⚠ Climatizador precisa estar ligado para ajustar velocidade!',
+            );
+            print(
+              '💡 Ligue o climatizador primeiro (opção 1).',
             );
           } else {
-            print(
-              '❌ Velocidade inválida (deve ser 0, 1, 2 ou 3)!',
+            stdout.write(
+              'Velocidade do ventilador (1-3, ou ENTER para incrementar): ',
             );
+            String? velStr =
+                await _readLineAsync();
+
+            if (velStr == null ||
+                velStr.trim().isEmpty) {
+              // Apenas incrementa
+              await sistemaController
+                  .enviarComandoClimatizador(
+                    'velocidade',
+                  );
+              print('✅ Velocidade incrementada!');
+            } else {
+              int? novaVel = int.tryParse(
+                velStr.trim(),
+              );
+              if (novaVel != null &&
+                  novaVel >= 1 &&
+                  novaVel <= 3) {
+                await sistemaController
+                    .enviarComandoClimatizador(
+                      'velocidade',
+                      velocidade: novaVel,
+                    );
+                print(
+                  '✅ Ventilador ajustado para velocidade $novaVel!',
+                );
+              } else {
+                print(
+                  '❌ Velocidade inválida (deve ser 1, 2 ou 3)!',
+                );
+              }
+            }
           }
           break;
 
         case '3':
-          await firebaseService
-              .enviarComandoClimatizador(
-                'umidificador:toggle',
-              );
-          print('✅ Umidificador alternado!');
+          // Toggle umidificador
+          if (estadoAtual?.ligado != true) {
+            print(
+              '⚠ Climatizador precisa estar ligado para controlar umidificação!',
+            );
+          } else {
+            await sistemaController
+                .enviarComandoClimatizador(
+                  'umidificar',
+                );
+            print('✅ Umidificador alternado!');
+          }
+          break;
+
+        case '4':
+          // Ajustar timer
+          if (estadoAtual?.ligado != true) {
+            print(
+              '⚠ Climatizador precisa estar ligado para ajustar timer!',
+            );
+          } else {
+            await sistemaController
+                .enviarComandoClimatizador(
+                  'timer',
+                );
+            print('✅ Timer ajustado!');
+          }
+          break;
+
+        case '5':
+          // Toggle aleta vertical
+          if (estadoAtual?.ligado != true) {
+            print(
+              '⚠ Climatizador precisa estar ligado para controlar aletas!',
+            );
+          } else {
+            await sistemaController
+                .enviarComandoClimatizador(
+                  'aleta_v',
+                );
+            print('✅ Aleta vertical alternada!');
+          }
+          break;
+
+        case '6':
+          // Toggle aleta horizontal
+          if (estadoAtual?.ligado != true) {
+            print(
+              '⚠ Climatizador precisa estar ligado para controlar aletas!',
+            );
+          } else {
+            await sistemaController
+                .enviarComandoClimatizador(
+                  'aleta_h',
+                );
+            print(
+              '✅ Aleta horizontal alternada!',
+            );
+          }
           break;
 
         case '0':
@@ -1569,7 +1702,7 @@ class MenuInterface {
   Future<void> _controlarIluminacao() async {
     _mostrarCabecalho();
     print('💡 CONTROLAR ILUMINAÇÃO');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
 
     try {
       stdout.write(
@@ -1609,7 +1742,7 @@ class MenuInterface {
   Future<void> _resetarSistema() async {
     _mostrarCabecalho();
     print('🔄 VOLTAR AO MODO AUTOMÁTICO');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
     stdout.write(
       '⚠️ Confirma que deseja retornar o climatizador ao modo AUTOMÁTICO? (s/N): ',
     );
@@ -1710,15 +1843,9 @@ class MenuInterface {
           print(
             '⚠️ Iluminação no modo AUTOMÁTICO, mas falha ao ajustar climatizador para AUTO.',
           );
-        } else if (!sucessoClima &&
-            !sucessoIlum) {
+        } else {
           print(
             '❌ Falha ao retornar ambos os sistemas para modo automático.',
-          );
-        } else if (!sucessoClima && sucessoIlum) {
-          // cobertura redundante, mas clara
-          print(
-            '⚠️ Iluminação no modo AUTOMÁTICO, mas falha ao ajustar climatizador para AUTO.',
           );
         }
       } catch (e) {
@@ -1734,7 +1861,7 @@ class MenuInterface {
   Future<void> _modoTeste() async {
     _mostrarCabecalho();
     print('🧪 MODO TESTE');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
     print(
       'Este modo permite testar a comunicação com os sistemas.',
     );
@@ -1845,12 +1972,10 @@ class MenuInterface {
     }
   }
 
-  // Configurações removidas — menu simplificado conforme solicitação do usuário.
-
   void _sair() {
     _mostrarCabecalho();
     print('🚪 ENCERRANDO SISTEMA');
-    print('─' * 70);
+    print('─' * _larguraPadrao);
     print(
       'Obrigado por usar o Sistema IoT Packbag!',
     );
@@ -1874,18 +1999,14 @@ class MenuInterface {
       );
     }
 
+    print('╔${'═' * (_larguraPadrao - 2)}╗');
     print(
-      '╔════════════════════════════════════════════════════════════════════╗',
+      '║${_padCelula('🏭 Sistema IoT Packbag v2.0', _larguraPadrao - 2, alinhamento: 'centro')}║',
     );
     print(
-      '║                    🏭 Sistema IoT Packbag v2.0                    ║',
+      '║${_padCelula('Dashboard Console - Dart', _larguraPadrao - 2, alinhamento: 'centro')}║',
     );
-    print(
-      '║                     Dashboard Console - Dart                       ║',
-    );
-    print(
-      '╚════════════════════════════════════════════════════════════════════╝',
-    );
+    print('╚${'═' * (_larguraPadrao - 2)}╝');
     print('');
   }
 

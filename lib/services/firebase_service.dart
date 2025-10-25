@@ -83,6 +83,22 @@ class FirebaseService {
     dynamic comando,
   ) async {
     try {
+      // Validar comando
+      String comandoStr = comando.toString();
+      if (comandoStr != 'auto' &&
+          ![
+            '0',
+            '25',
+            '50',
+            '75',
+            '100',
+          ].contains(comandoStr)) {
+        print(
+          '✗ Comando iluminação inválido: $comando',
+        );
+        return false;
+      }
+
       final url = Uri.parse(
         _buildUrl(
           '${FirebaseConfig.comandosPath}/iluminacao',
@@ -97,6 +113,7 @@ class FirebaseService {
           'comando': comando,
           'timestamp': DateTime.now()
               .millisecondsSinceEpoch,
+          'origem': 'app',
         }),
       );
 
@@ -120,29 +137,71 @@ class FirebaseService {
 
   // Enviar comando do climatizador
   Future<bool> enviarComandoClimatizador(
-    String comando,
-  ) async {
+    String comando, {
+    int? velocidade,
+  }) async {
     try {
+      // Validar comandos permitidos
+      final comandosValidos = [
+        'auto',
+        'power',
+        'power_on',
+        'power_off',
+        'velocidade',
+        'umidificar',
+        'timer',
+        'aleta_v',
+        'aleta_h',
+      ];
+
+      if (!comandosValidos.contains(comando)) {
+        print(
+          '✗ Comando climatizador inválido: $comando',
+        );
+        return false;
+      }
+
       final url = Uri.parse(
         _buildUrl(
           '${FirebaseConfig.comandosPath}/climatizador',
         ),
       );
+
+      Map<String, dynamic> payload = {
+        'comando': comando,
+        'timestamp':
+            DateTime.now().millisecondsSinceEpoch,
+        'origem': 'app',
+      };
+
+      // Adicionar velocidade se especificada e comando apropriado
+      if (velocidade != null &&
+          (comando == 'velocidade' ||
+              comando == 'power_on' ||
+              comando == 'power')) {
+        if (velocidade >= 1 && velocidade <= 3) {
+          payload['velocidade'] = velocidade;
+          print(
+            '✓ Velocidade especificada: $velocidade',
+          );
+        } else {
+          print(
+            '⚠ Velocidade inválida ignorada: $velocidade (deve ser 1-3)',
+          );
+        }
+      }
+
       final response = await http.put(
         url,
         headers: {
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({
-          'comando': comando,
-          'timestamp': DateTime.now()
-              .millisecondsSinceEpoch,
-        }),
+        body: jsonEncode(payload),
       );
 
       if (response.statusCode == 200) {
         final msg =
-            '✓ Comando climatizador enviado: $comando';
+            '✓ Comando climatizador enviado: $comando${velocidade != null ? ' (vel: $velocidade)' : ''}';
         if (_saidaService != null) {
           _saidaService.adicionar(msg);
         } else {

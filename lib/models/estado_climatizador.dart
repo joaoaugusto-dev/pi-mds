@@ -21,17 +21,32 @@ class EstadoClimatizador {
     this.origem = 'sistema',
   });
 
-  factory EstadoClimatizador.fromJson(Map<String, dynamic> json) {
+  factory EstadoClimatizador.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return EstadoClimatizador(
       ligado: json['ligado'] ?? false,
       umidificando: json['umidificando'] ?? false,
-      velocidade: json['velocidade']?.toInt() ?? 0,
-      ultimaVelocidade: json['ultima_velocidade']?.toInt() ?? 1,
+      velocidade:
+          json['velocidade']?.toInt() ?? 0,
+      ultimaVelocidade:
+          json['ultima_velocidade']?.toInt() ?? 1,
       timer: json['timer']?.toInt() ?? 0,
-      aletaVertical: json['aleta_vertical'] ?? false,
-      aletaHorizontal: json['aleta_horizontal'] ?? false,
-      ultimaAtualizacao: json['ultima_atualizacao'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(json['ultima_atualizacao'])
+      aletaVertical:
+          json['aleta_vertical'] ?? false,
+      aletaHorizontal:
+          json['aleta_horizontal'] ?? false,
+      ultimaAtualizacao:
+          json['ultima_atualizacao'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(
+              json['ultima_atualizacao'] is int
+                  ? json['ultima_atualizacao']
+                  : int.tryParse(
+                          json['ultima_atualizacao']
+                              .toString(),
+                        ) ??
+                        0,
+            )
           : null,
       origem: json['origem'] ?? 'sistema',
     );
@@ -46,26 +61,41 @@ class EstadoClimatizador {
       'timer': timer,
       'aleta_vertical': aletaVertical,
       'aleta_horizontal': aletaHorizontal,
-      'ultima_atualizacao': ultimaAtualizacao?.millisecondsSinceEpoch,
+      'ultima_atualizacao': ultimaAtualizacao
+          ?.millisecondsSinceEpoch,
       'origem': origem,
     };
   }
 
   bool get atualizado {
     if (ultimaAtualizacao == null) return false;
-    return DateTime.now().difference(ultimaAtualizacao!).inMinutes < 1;
+    return DateTime.now()
+            .difference(ultimaAtualizacao!)
+            .inMinutes <
+        1;
   }
 
   @override
   String toString() {
-    String status = ligado ? 'LIGADO' : 'DESLIGADO';
+    String status = ligado
+        ? 'LIGADO'
+        : 'DESLIGADO';
     String extra = '';
     if (ligado) {
       extra = ' (vel: $velocidade';
-      if (umidificando) extra += ', umid';
-      if (aletaVertical) extra += ', av';
-      if (aletaHorizontal) extra += ', ah';
-      if (timer > 0) extra += ', timer: ${timer}h';
+      if (umidificando) extra += ', umid: ON';
+      if (aletaVertical) extra += ', av: ON';
+      if (aletaHorizontal) extra += ', ah: ON';
+      if (timer > 0)
+        extra += ', timer: ${timer}h';
+      extra += ')';
+    } else if (!ligado && ultimaVelocidade > 0) {
+      // Mostrar configurações preservadas quando desligado
+      extra =
+          ' (configs preservadas: vel=$ultimaVelocidade';
+      if (umidificando) extra += ', umid: ON';
+      if (aletaVertical) extra += ', av: ON';
+      if (aletaHorizontal) extra += ', ah: ON';
       extra += ')';
     }
     return 'Climatizador: $status$extra [$origem]';

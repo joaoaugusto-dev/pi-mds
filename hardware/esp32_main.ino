@@ -1396,8 +1396,13 @@ void atualizarEstadoClima(uint8_t comando) {
       break;
       
     case IR_UMIDIFICAR:
-      clima.umidificando = !clima.umidificando;
-      debugPrint("Umidificador: " + String(clima.umidificando ? "LIGADO" : "DESLIGADO"));
+      // Só pode alternar umidificação se o climatizador estiver ligado
+      if (clima.ligado) {
+        clima.umidificando = !clima.umidificando;
+        debugPrint("Umidificador: " + String(clima.umidificando ? "LIGADO" : "DESLIGADO"));
+      } else {
+        debugPrint("⚠ Umidificador não pode ser alterado com climatizador desligado");
+      }
       break;
       
     case IR_VELOCIDADE:
@@ -1568,8 +1573,8 @@ void controleAutomaticoClima() {
   }
 
   // Controle automático do umidificador (histerese: ligar <55%, desligar >65%)
-  // Só aplicar se houver pessoas no ambiente, leitura válida e não estiver em modo manual
-  if (pessoas.total > 0 && sensores.dadosValidos && !flags.modoManualClima) {
+  // Só aplicar se: houver pessoas, leitura válida, climatizador LIGADO e não estiver em modo manual
+  if (pessoas.total > 0 && sensores.dadosValidos && clima.ligado && !flags.modoManualClima) {
     // Ligar umidificador se umidade estiver abaixo do limiar de acionamento
     if (sensores.humidade < 55.0 && !clima.umidificando) {
       debugPrint("Auto Umidificador: Humidade " + String(sensores.humidade) + "% < 55% -> LIGAR");
@@ -1593,6 +1598,11 @@ void controleAutomaticoClima() {
       delay(500);
       atualizarLCD();
     }
+  } else if (pessoas.total == 0 && clima.umidificando) {
+    // Se não há pessoas e o umidificador está ligado, desligar
+    debugPrint("Desligando umidificador: sem pessoas no ambiente");
+    enviarComandoIR(IR_UMIDIFICAR);
+    delay(500);
   }
 }
 
@@ -1639,7 +1649,7 @@ void verificarComandos() {
   // Verificar comandos do climatizador
   String cmdClima = lerDadosFirebase("/comandos/climatizador");
   if (cmdClima.length() > 0 && cmdClima != "null") {
-    StaticJsonDocument<100> doc;
+    StaticJsonDocument<200> doc;
     DeserializationError error = deserializeJson(doc, cmdClima);
     
     if (!error) {
@@ -1649,38 +1659,135 @@ void verificarComandos() {
         flags.modoManualClima = false;
         debugPrint("🔄 Climatizador: modo automático ativado");
         tocarSom(SOM_OK);
+        // Aplicar automação imediatamente
+        controleAutomaticoClima();
         
       } else if (comando == "power_on" || comando == "power") {
         flags.modoManualClima = true;
         if (!clima.ligado) {
           enviarComandoIR(IR_POWER);
+          debugPrint("💨 Climatizador ligado via comando manual");
+          
+          // Aguardar estabilização após ligar
+          delay(1500);
+          
+          // Se há velocidade especificada no comando, tentar ajustar
+          if (doc.containsKey("velocidade")) {
+            int velDesejada = doc["velocidade"];
+            if (velDesejada >= 1 && velDesejada <= 3 && clima.ligado) {
+              debugPrint("Ajustando para velocidade " + String(velDesejada) + " após ligar");
+              int tentativas = 0;
+              while (clima.velocidade != velDesejada && tentativas < 5) {
+                if (enviarComandoIR(IR_VELOCIDADE)) {
+                  tentativas++;
+                  unsigned long t0 = millis();
+                  while (controleIR.estado != IR_OCIOSO && millis() - t0 < TIMEOUT_CONFIRMACAO + 200) {
+                    processarIRRecebido();
+                    delay(10);
+                  }
+                } else {
+                  break;
+                }
+              }
+              atualizarLCD();
+            }
+          }
         }
         
       } else if (comando == "power_off") {
         flags.modoManualClima = true;
         if (clima.ligado) {
           enviarComandoIR(IR_POWER);
+          debugPrint("💤 Climatizador desligado via comando manual");
         }
         
       } else if (comando == "velocidade") {
         flags.modoManualClima = true;
-        enviarComandoIR(IR_VELOCIDADE);
+        if (clima.ligado) {
+          // Verificar se há velocidade específica solicitada
+          if (doc.containsKey("velocidade")) {
+            int velDesejada = doc["velocidade"];
+            if (velDesejada >= 1 && velDesejada <= 3) {
+              debugPrint("⚙️ Ajustando para velocidade " + String(velDesejada) + " (atual: " + String(clima.velocidade) + ")");
+              
+              lcd.clear();
+              lcd.setCursor(0, 0);
+              lcd.write(5);
+              lcd.print(" Manual Vel");
+              lcd.setCursor(0, 1);
+              lcd.print("Vel ");
+              lcd.print(clima.velocidade);
+              lcd.print(" -> ");
+              lcd.print(velDesejada);
+              tocarSom(SOM_COMANDO);
+              delay(600);
+              
+              // Calcular quantos comandos são necessários (como no automático)
+              int tentativas = 0;
+              while (clima.velocidade != velDesejada && tentativas < 5) {
+                if (enviarComandoIR(IR_VELOCIDADE)) {
+                  tentativas++;
+                  // Aguardar processamento do comando IR
+                  unsigned long t0 = millis();
+                  while (controleIR.estado != IR_OCIOSO && millis() - t0 < TIMEOUT_CONFIRMACAO + 200) {
+                    processarIRRecebido();
+                    delay(10);
+                  }
+                  delay(300); // Pausa extra para estabilidade
+                } else {
+                  break;
+                }
+              }
+              
+              atualizarLCD();
+              debugPrint("✓ Velocidade ajustada para " + String(clima.velocidade));
+            } else {
+              debugPrint("⚠ Velocidade inválida: " + String(velDesejada) + " (deve ser 1-3)");
+            }
+          } else {
+            // Se não especificou velocidade, apenas incrementa uma vez
+            enviarComandoIR(IR_VELOCIDADE);
+            debugPrint("⚙️ Velocidade incrementada via comando manual");
+          }
+        } else {
+          debugPrint("⚠ Velocidade não pode ser alterada com climatizador desligado");
+        }
         
       } else if (comando == "umidificar") {
         flags.modoManualClima = true;
-        enviarComandoIR(IR_UMIDIFICAR);
+        if (clima.ligado) {
+          enviarComandoIR(IR_UMIDIFICAR);
+          debugPrint("💧 Umidificação alterada via comando manual");
+        } else {
+          debugPrint("⚠ Umidificação não pode ser alterada com climatizador desligado");
+        }
         
       } else if (comando == "timer") {
         flags.modoManualClima = true;
-        enviarComandoIR(IR_TIMER);
+        if (clima.ligado) {
+          enviarComandoIR(IR_TIMER);
+          debugPrint("⏲️ Timer alterado via comando manual");
+        } else {
+          debugPrint("⚠ Timer não pode ser alterado com climatizador desligado");
+        }
         
       } else if (comando == "aleta_v") {
         flags.modoManualClima = true;
-        enviarComandoIR(IR_ALETA_VERTICAL);
+        if (clima.ligado) {
+          enviarComandoIR(IR_ALETA_VERTICAL);
+          debugPrint("🔼 Aleta vertical alterada via comando manual");
+        } else {
+          debugPrint("⚠ Aleta vertical não pode ser alterada com climatizador desligado");
+        }
         
       } else if (comando == "aleta_h") {
         flags.modoManualClima = true;
-        enviarComandoIR(IR_ALETA_HORIZONTAL);
+        if (clima.ligado) {
+          enviarComandoIR(IR_ALETA_HORIZONTAL);
+          debugPrint("↔️ Aleta horizontal alterada via comando manual");
+        } else {
+          debugPrint("⚠ Aleta horizontal não pode ser alterada com climatizador desligado");
+        }
       }
       
       // Limpar comando processado
@@ -1727,18 +1834,32 @@ void processarIRRecebido() {
         
         debugPrint("IR recebido do controle: " + String(comando, HEX));
         
-        // Atualizar estado e exibir
-        atualizarEstadoClima(comando);
-        atualizarTelaClimatizador();
+        // Verificar se é comando válido no contexto atual
+        bool comandoPermitido = true;
         
-        // CORREÇÃO: Só ativa modo manual se houver pessoas presentes
-        // Se não há pessoas, ignora comandos IR físicos (evita ativação acidental)
-        if (pessoas.total > 0) {
-          flags.modoManualClima = true;
-          debugPrint("✓ Modo manual clima ATIVADO (controle físico)");
-          tocarSom(SOM_COMANDO);
-        } else {
+        // Comandos de umidificação, velocidade, timer e aletas só funcionam com clima ligado
+        if (!clima.ligado && (comando == IR_UMIDIFICAR || comando == IR_VELOCIDADE || 
+            comando == IR_TIMER || comando == IR_ALETA_VERTICAL || comando == IR_ALETA_HORIZONTAL)) {
+          comandoPermitido = false;
+          debugPrint("⚠ Comando IR ignorado - climatizador desligado");
+        }
+        
+        // Só ativa modo manual se houver pessoas presentes
+        if (pessoas.total == 0 && comando != IR_POWER) {
+          comandoPermitido = false;
           debugPrint("⚠ Comando IR ignorado - sem pessoas no ambiente");
+        }
+        
+        if (comandoPermitido) {
+          // Atualizar estado e exibir
+          atualizarEstadoClima(comando);
+          atualizarTelaClimatizador();
+          
+          if (pessoas.total > 0) {
+            flags.modoManualClima = true;
+            debugPrint("✓ Modo manual clima ATIVADO (controle físico)");
+            tocarSom(SOM_COMANDO);
+          }
         }
       }
     }

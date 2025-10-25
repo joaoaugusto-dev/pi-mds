@@ -211,10 +211,8 @@ class SistemaIotController {
 
     // Se por algum motivo não foi possível calcular via MySQL, usar o método
     // existente como fallback (mantém compatibilidade).
-    if (preferencias == null) {
-      preferencias = await funcionarioService
-          .calcularPreferenciasGrupo(dados.tags);
-    }
+    preferencias ??= await funcionarioService
+        .calcularPreferenciasGrupo(dados.tags);
 
     // Automação da iluminação — só aplicar se o comando atual estiver em 'auto'.
     if (_comandoIluminacaoAtual == 'auto') {
@@ -336,23 +334,108 @@ class SistemaIotController {
 
   // Controles manuais - Climatizador
   Future<bool> enviarComandoClimatizador(
-    String comando,
-  ) async {
+    String comando, {
+    int? velocidade,
+  }) async {
+    // Validar comandos
+    final comandosValidos = [
+      'auto',
+      'power',
+      'power_on',
+      'power_off',
+      'velocidade',
+      'umidificar',
+      'timer',
+      'aleta_v',
+      'aleta_h',
+    ];
+
+    if (!comandosValidos.contains(comando)) {
+      print(
+        '✗ Comando climatizador inválido: $comando',
+      );
+      return false;
+    }
+
     if (comando == 'auto') {
       print(
         '🔄 Climatizador voltou ao modo automático',
       );
-      return true;
+      return await firebaseService
+          .enviarComandoClimatizador(comando);
     }
+
+    // Verificar se o climatizador está ligado para certos comandos
+    if (_ultimoEstadoClima != null &&
+        !_ultimoEstadoClima!.ligado) {
+      if ([
+        'velocidade',
+        'umidificar',
+        'timer',
+        'aleta_v',
+        'aleta_h',
+      ].contains(comando)) {
+        print(
+          '⚠ Comando "$comando" requer que o climatizador esteja ligado',
+        );
+        print(
+          '💡 Ligue o climatizador primeiro com o comando "power_on"',
+        );
+        return false;
+      }
+    }
+
+    // Validar velocidade se fornecida
+    if (velocidade != null &&
+        (velocidade < 1 || velocidade > 3)) {
+      print(
+        '⚠ Velocidade inválida: $velocidade (deve ser 1-3)',
+      );
+      return false;
+    }
+
     // Envia comando manual ao climatizador (servidor repassa ao ESP via Firebase)
     bool sucesso = await firebaseService
-        .enviarComandoClimatizador(comando);
+        .enviarComandoClimatizador(
+          comando,
+          velocidade: velocidade,
+        );
 
     if (sucesso) {
-      _log('❄️ Comando climatizador: $comando');
+      String emoji = _getEmojiParaComando(
+        comando,
+      );
+      String msg =
+          '$emoji Comando climatizador: $comando';
+      if (velocidade != null) {
+        msg += ' (velocidade: $velocidade)';
+      }
+      _log(msg);
     }
 
     return sucesso;
+  }
+
+  String _getEmojiParaComando(String comando) {
+    switch (comando) {
+      case 'power':
+      case 'power_on':
+        return '💨';
+      case 'power_off':
+        return '💤';
+      case 'velocidade':
+        return '⚙️';
+      case 'umidificar':
+        return '💧';
+      case 'timer':
+        return '⏲️';
+      case 'aleta_v':
+        return '🔼';
+      case 'aleta_h':
+        return '↔️';
+      default:
+        return '❄️';
+    }
   }
 
   // Obter resumo do sistema
