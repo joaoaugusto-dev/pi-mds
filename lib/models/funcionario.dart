@@ -23,7 +23,6 @@ class Funcionario {
     this.updatedAt,
   });
 
-  // Construtor para criar a partir do banco de dados
   factory Funcionario.fromMap(Map<String, dynamic> map) {
     return Funcionario(
       id: map['id'],
@@ -43,7 +42,6 @@ class Funcionario {
     );
   }
 
-  // Converter para Map para insert/update
   Map<String, dynamic> toMap() {
     return {
       'id': id,

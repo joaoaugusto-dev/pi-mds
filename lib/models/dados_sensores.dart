@@ -2,12 +2,12 @@ class DadosSensores {
   double temperatura;
   double humidade;
   int luminosidade;
-  int ldr; // valor bruto do sensor LDR (ADC)
+  int ldr;
   int pessoas;
   List<String> tags;
   DateTime timestamp;
   bool dadosValidos;
-  int iluminacaoArtificial; // Iluminação artificial (0, 25, 50, 75, 100)
+  int iluminacaoArtificial;
 
   DadosSensores({
     required this.temperatura,
@@ -51,7 +51,6 @@ class DadosSensores {
     };
   }
 
-  // Para salvar histórico no MySQL
   Map<String, dynamic> toHistoricoMap({
     bool? climaLigado,
     bool? climaUmidificando,

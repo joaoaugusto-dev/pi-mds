@@ -1,9 +1,11 @@
+
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../config/firebase_config.dart';
 import '../models/dados_sensores.dart';
 import '../models/estado_climatizador.dart';
 import 'saida_service.dart';
+
 
 class FirebaseService {
   final String baseUrl;
@@ -17,9 +19,6 @@ class FirebaseService {
   }) : _saidaService = saidaService;
 
   String _buildUrl(String path) {
-    // Ensure we don't produce double slashes when baseUrl ends with '/'
-    // and path begins with '/'. Firebase accepts both, but normalizing
-    // helps avoid subtle issues and makes logs clearer.
     String p = path.startsWith('/')
         ? path.substring(1)
         : path;
@@ -31,7 +30,6 @@ class FirebaseService {
     return url;
   }
 
-  // Ler dados dos sensores em tempo real
   Future<DadosSensores?> lerSensores() async {
     try {
       final url = Uri.parse(
@@ -53,7 +51,6 @@ class FirebaseService {
     return null;
   }
 
-  // Ler estado do climatizador
   Future<EstadoClimatizador?>
   lerClimatizador() async {
     try {
@@ -78,12 +75,10 @@ class FirebaseService {
     return null;
   }
 
-  // Enviar comando de iluminação
   Future<bool> enviarComandoIluminacao(
     dynamic comando,
   ) async {
     try {
-      // Validar comando
       String comandoStr = comando.toString();
       if (comandoStr != 'auto' &&
           ![
@@ -135,13 +130,11 @@ class FirebaseService {
     return false;
   }
 
-  // Enviar comando do climatizador
   Future<bool> enviarComandoClimatizador(
     String comando, {
     int? velocidade,
   }) async {
     try {
-      // Validar comandos permitidos
       final comandosValidos = [
         'auto',
         'power',
@@ -174,7 +167,6 @@ class FirebaseService {
         'origem': 'app',
       };
 
-      // Adicionar velocidade se especificada e comando apropriado
       if (velocidade != null &&
           (comando == 'velocidade' ||
               comando == 'power_on' ||
@@ -217,7 +209,6 @@ class FirebaseService {
     return false;
   }
 
-  // Ler últimos logs do Firebase (se aplicável)
   Future<List<Map<String, dynamic>>> lerLogs({
     int limit = 50,
   }) async {
@@ -239,7 +230,6 @@ class FirebaseService {
           }
         });
 
-        // Ordenar por timestamp mais recente
         logs.sort((a, b) {
           int timestampA = a['timestamp'] ?? 0;
           int timestampB = b['timestamp'] ?? 0;
@@ -254,7 +244,6 @@ class FirebaseService {
     return [];
   }
 
-  // Escrever log no Firebase
   Future<bool> escreverLog(
     Map<String, dynamic> logData,
   ) async {
@@ -282,7 +271,6 @@ class FirebaseService {
     }
   }
 
-  // Limpar comando específico (para evitar repetições)
   Future<bool> limparComando(
     String caminho,
   ) async {
@@ -296,7 +284,6 @@ class FirebaseService {
     }
   }
 
-  // Ler última tag lida pelo ESP (campo /ultima_tag)
   Future<String?> lerUltimaTag() async {
     try {
       final url = Uri.parse(
@@ -307,7 +294,6 @@ class FirebaseService {
       if (response.statusCode == 200 &&
           response.body != 'null') {
         String body = response.body;
-        // remover aspas se for string direta
         body = body.replaceAll('"', '');
         return body.trim();
       }
@@ -319,7 +305,6 @@ class FirebaseService {
     return null;
   }
 
-  // Limpar /ultima_tag após consumo
   Future<bool> limparUltimaTag() async {
     try {
       final url = Uri.parse(
@@ -333,7 +318,6 @@ class FirebaseService {
     }
   }
 
-  // Ativar/Desativar modo de cadastro no ESP32 (campo /modo_cadastro)
   Future<bool> setModoCadastro(bool ativo) async {
     try {
       final url = Uri.parse(
@@ -363,7 +347,6 @@ class FirebaseService {
     return false;
   }
 
-  // Escutar mudanças em tempo real (simulação com polling)
   Stream<DadosSensores?> streamSensores({
     Duration interval = const Duration(
       seconds: 2,
@@ -386,7 +369,6 @@ class FirebaseService {
     }
   }
 
-  // Ler solicitação de preferências do ESP32
   Future<String?> lerPreferenciasRequest() async {
     try {
       final url = Uri.parse(
@@ -406,7 +388,6 @@ class FirebaseService {
     return null;
   }
 
-  // Limpar /preferencias_request após processamento
   Future<bool> limparPreferenciasRequest() async {
     try {
       final url = Uri.parse(
@@ -422,7 +403,6 @@ class FirebaseService {
     }
   }
 
-  // Salvar preferências de grupo calculadas (comunicação para o ESP)
   Future<bool> salvarPreferenciasGrupo(
     Map<String, dynamic> preferencias,
   ) async {
@@ -473,7 +453,5 @@ class FirebaseService {
     }
   }
 
-  // Nota: preferências individuais e cálculos são mantidos no MySQL/Dart. Este
-  // método apenas publica o resultado do cálculo de grupo no Firebase para que
-  // o ESP possa ler (padrão de comunicação).
+  
 }

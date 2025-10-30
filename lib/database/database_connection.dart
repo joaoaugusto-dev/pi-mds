@@ -19,7 +19,6 @@ class DatabaseConnection {
         ),
       );
 
-      // Testar a conexão
       try {
         await _connection!.query('SELECT 1');
         print("✓ Conexão MySQL estabelecida com sucesso!");
@@ -41,12 +40,10 @@ class DatabaseConnection {
 
   MySqlConnection? get connection => _connection;
 
-  // Criar tabelas se não existirem
   Future<void> createTables() async {
     if (_connection == null) return;
 
     try {
-      // Tabela de funcionários
       await _connection!.query('''
         CREATE TABLE IF NOT EXISTS funcionarios (
           id INT AUTO_INCREMENT PRIMARY KEY,
@@ -62,7 +59,6 @@ class DatabaseConnection {
         )
       ''');
 
-      // Tabela de logs
       await _connection!.query('''
         CREATE TABLE IF NOT EXISTS logs (
           id INT AUTO_INCREMENT PRIMARY KEY,
@@ -80,37 +76,26 @@ class DatabaseConnection {
         )
       ''');
 
-      // Garantir que a coluna hash_controle exista em bases antigas (migração silenciosa)
       try {
-        // Usamos ADD COLUMN IF NOT EXISTS quando disponível (MySQL 8+).
         await _connection!.query(
           "ALTER TABLE logs ADD COLUMN IF NOT EXISTS hash_controle VARCHAR(64)",
         );
       } catch (e) {
-        // Alguns servidores MySQL mais antigos não suportam IF NOT EXISTS; tentar adicionar e ignorar erro se já existir
         try {
           await _connection!.query(
             "ALTER TABLE logs ADD COLUMN hash_controle VARCHAR(64)",
           );
         } catch (_) {
-          // ignorar
         }
       }
 
-      // Criar índice único para evitar duplicatas pelo hash de controle (se não existir)
       try {
         await _connection!.query(
           "ALTER TABLE logs ADD UNIQUE INDEX idx_hash_controle (hash_controle)",
         );
       } catch (_) {
-        // ignorar erros (índice já existe ou não pode ser criado)
       }
 
-      // Tabela de dados históricos dos sensores (para Power BI)
-      // Ordem de colunas desejada:
-      // id, temperatura, humidade, ldr, iluminacao_artificial, pessoas,
-      // tags_presentes, clima_ligado, clima_umidificando,
-      // clima_velocidade, timestamp
       await _connection!.query('''
         CREATE TABLE IF NOT EXISTS dados_historicos (
           id INT AUTO_INCREMENT PRIMARY KEY,
@@ -126,9 +111,6 @@ class DatabaseConnection {
           timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
       ''');
-
-      // NOTE: A tabela 'preferencias_tags' foi removida. Preferências agora
-      // residem diretamente na tabela `funcionarios` (colunas temp_preferida/lumi_preferida).
 
       print("✓ Tabelas criadas/verificadas com sucesso!");
     } catch (e) {

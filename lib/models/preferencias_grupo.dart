@@ -34,7 +34,7 @@ class PreferenciasGrupo {
       'temperatura_media': temperaturaMedia,
       'luminosidade_media': luminosidadeMedia,
       'luminosidade_utilizada': luminosidadeUtilizada,
-      // Campos legados / compatíveis com firmware ESP32
+      
       'temperatura_preferida': temperaturaMedia,
       'luminosidade_preferida': luminosidadeUtilizada,
       'funcionarios_presentes': funcionariosPresentes,

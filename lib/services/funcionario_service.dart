@@ -9,7 +9,6 @@ class FuncionarioService {
 
   FuncionarioService(this.funcionarioDao, {this.saidaService});
 
-  // Calcular preferências do grupo com base nas tags presentes
   Future<PreferenciasGrupo> calcularPreferenciasGrupo(List<String> tags) async {
     if (tags.isEmpty) {
       return PreferenciasGrupo(
@@ -22,16 +21,13 @@ class FuncionarioService {
       );
     }
 
-    // Buscar funcionários cadastrados com essas tags
     List<Funcionario> funcionarios = await funcionarioDao.buscarPorTags(tags);
 
-    // Separar tags conhecidas e desconhecidas
     List<String> tagsConhecidas = funcionarios.map((f) => f.tagNfc!).toList();
     List<String> tagsDesconhecidas = tags
         .where((tag) => !tagsConhecidas.contains(tag))
         .toList();
 
-    // Preparar lista de funcionários presentes
     List<Map<String, dynamic>> funcionariosPresentes = funcionarios
         .map(
           (f) => {
@@ -44,23 +40,19 @@ class FuncionarioService {
         )
         .toList();
 
-    // Calcular médias apenas com funcionários válidos
     double? temperaturaMedia;
     double? luminosidadeMedia;
     int luminosidadeUtilizada = 50;
 
     if (funcionarios.isNotEmpty) {
-      // Filtrar funcionários com preferências válidas para temperatura (16-32°C)
       List<Funcionario> funcionariosTemperaturaValida = funcionarios
           .where((f) => f.tempPreferida >= 16 && f.tempPreferida <= 32)
           .toList();
 
-      // Filtrar funcionários com preferências válidas para luminosidade (0-100%)
       List<Funcionario> funcionariosLuminosidadeValida = funcionarios
           .where((f) => f.lumiPreferida >= 0 && f.lumiPreferida <= 100)
           .toList();
 
-      // Calcular temperatura média
       if (funcionariosTemperaturaValida.isNotEmpty) {
         double somaTemp = funcionariosTemperaturaValida.fold(
           0.0,
@@ -68,10 +60,9 @@ class FuncionarioService {
         );
         temperaturaMedia = somaTemp / funcionariosTemperaturaValida.length;
       } else {
-        temperaturaMedia = 25.0; // Padrão
+        temperaturaMedia = 25.0;
       }
 
-      // Calcular luminosidade média
       if (funcionariosLuminosidadeValida.isNotEmpty) {
         double somaLumi = funcionariosLuminosidadeValida.fold(
           0.0,
@@ -80,7 +71,7 @@ class FuncionarioService {
         luminosidadeMedia = somaLumi / funcionariosLuminosidadeValida.length;
         luminosidadeUtilizada = _nivelValido(luminosidadeMedia);
       } else {
-        luminosidadeMedia = 50.0; // Padrão
+        luminosidadeMedia = 50.0;
         luminosidadeUtilizada = 50;
       }
 
@@ -132,7 +123,6 @@ class FuncionarioService {
     );
   }
 
-  // Função auxiliar para "snapping" de luminosidade para múltiplos de 25
   int _nivelValido(double media) {
     if (media == 0) return 0;
     const niveis = [0, 25, 50, 75, 100];
@@ -150,22 +140,18 @@ class FuncionarioService {
     return nivelMaisProximo;
   }
 
-  // Listar todos os funcionários
   Future<List<Funcionario>> listarTodos() async {
     return await funcionarioDao.listarFuncionarios();
   }
 
-  // Buscar funcionário por matrícula
   Future<Funcionario?> buscarPorMatricula(int matricula) async {
     return await funcionarioDao.buscarPorMatricula(matricula);
   }
 
-  // Buscar funcionário por tag NFC
   Future<Funcionario?> buscarPorTag(String tag) async {
     return await funcionarioDao.buscarPorTag(tag);
   }
 
-  // Cadastrar novo funcionário
   Future<bool> cadastrar(Funcionario funcionario) async {
     try {
       return await funcionarioDao.inserirFuncionario(funcionario);
@@ -175,13 +161,11 @@ class FuncionarioService {
     }
   }
 
-  // Atualizar preferências
   Future<bool> atualizarPreferencias(
     int matricula,
     double temperatura,
     int luminosidade,
   ) async {
-    // Validações
     if (temperatura < 16 || temperatura > 32) {
       print('✗ Temperatura deve estar entre 16°C e 32°C');
       return false;
@@ -199,12 +183,10 @@ class FuncionarioService {
     );
   }
 
-  // Remover funcionário
   Future<bool> remover(int matricula) async {
     return await funcionarioDao.removerFuncionario(matricula);
   }
 
-  // Métodos adicionais para interface
   Future<bool> salvar(Funcionario funcionario) async {
     try {
       return await funcionarioDao.inserirFuncionario(funcionario);

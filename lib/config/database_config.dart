@@ -13,12 +13,11 @@ class DatabaseConfig {
     required this.dbName,
   });
 
-  // Configuração padrão para o projeto
   static DatabaseConfig get defaultConfig => DatabaseConfig(
     host: 'localhost',
     port: 3306,
     user: 'root',
-    password: null, // ou sua senha do MySQL
+        password: null,
     dbName: 'pi_iot_system',
   );
 }

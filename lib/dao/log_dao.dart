@@ -11,13 +11,10 @@ class LogDao {
     try {
       final conn = db.connection;
       if (conn != null) {
-        // Gerar hash único baseado na tag, tipo, nome e minuto atual
-        // Isso permite apenas 1 log do mesmo tipo por pessoa por minuto
         String hashData =
-            '${log.tagNfc ?? ''}_${log.tipo}_${log.nomeCompleto}_${DateTime.now().toString().substring(0, 16)}'; // até minuto
+            '${log.tagNfc ?? ''}_${log.tipo}_${log.nomeCompleto}_${DateTime.now().toString().substring(0, 16)}';
 
         try {
-          // Tentar inserir com hash_controle
           await conn.query(
             '''INSERT INTO logs 
                (funcionario_id, matricula, nome_completo, tipo, tag_nfc, hash_controle) 
@@ -34,7 +31,6 @@ class LogDao {
           print("✓ Log ${colorTipo(log.tipo)} registrado: ${log.nomeCompleto}");
         } catch (e) {
           var err = e.toString();
-          // Se a coluna hash_controle não existir no banco, tentar inserir sem ela
           if (err.contains("Unknown column 'hash_controle'") ||
               err.contains('1054') ||
               err.contains('42S22')) {
@@ -68,7 +64,7 @@ class LogDao {
               "⏩ Log duplicado ignorado: ${log.tipo} - ${log.nomeCompleto} (hash collision)",
             );
           } else {
-            rethrow; // Re-throw se não for erro de duplicata
+            rethrow;
           }
         }
       } else {
@@ -153,9 +149,6 @@ class LogDao {
       final conn = db.connection;
       if (conn == null) return logs;
 
-      // Buscar logs pelo id interno (funcionario_id) OU pela matrícula.
-      // Alguns lugares do código podem passar a matrícula em vez do id;
-      // aceitar ambos evita resultados vazios.
       var result = await conn.query(
         "SELECT id, funcionario_id, matricula, nome_completo, tipo, tag_nfc, createdAt, updatedAt FROM logs WHERE funcionario_id = ? OR matricula = ? ORDER BY createdAt DESC",
         [funcionarioId, funcionarioId],

@@ -31,7 +31,7 @@ Future<void> main() async {
     FuncionarioDao funcionarioDao = FuncionarioDao(dbConnection);
     LogDao logDao = LogDao(dbConnection);
     HistoricoDao historicoDao = HistoricoDao(dbConnection);
-    // PreferenciaTagDao removed: preferências ler-se-ão diretamente da tabela `funcionarios`.
+    
 
     print('🔧 Inicializando Services...');
     SaidaService saidaService = SaidaService(capacidade: 500);

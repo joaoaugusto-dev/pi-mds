@@ -7,7 +7,7 @@ class EstadoClimatizador {
   bool aletaVertical;
   bool aletaHorizontal;
   DateTime? ultimaAtualizacao;
-  String origem; // 'sistema', 'manual', 'ir'
+  String origem;
 
   EstadoClimatizador({
     this.ligado = false,
@@ -86,11 +86,11 @@ class EstadoClimatizador {
       if (umidificando) extra += ', umid: ON';
       if (aletaVertical) extra += ', av: ON';
       if (aletaHorizontal) extra += ', ah: ON';
-      if (timer > 0)
+      if (timer > 0) {
         extra += ', timer: ${timer}h';
+      }
       extra += ')';
     } else if (!ligado && ultimaVelocidade > 0) {
-      // Mostrar configurações preservadas quando desligado
       extra =
           ' (configs preservadas: vel=$ultimaVelocidade';
       if (umidificando) extra += ', umid: ON';

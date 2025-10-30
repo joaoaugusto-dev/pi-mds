@@ -5,7 +5,7 @@ class LogEntry {
   int? funcionarioId;
   String? matricula;
   String? nomeCompleto;
-  String tipo; // 'entrada' ou 'saida'
+  String tipo;
   String? tagNfc;
   DateTime? createdAt;
   DateTime? updatedAt;

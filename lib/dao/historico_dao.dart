@@ -16,9 +16,6 @@ class HistoricoDao {
     try {
       final conn = db.connection;
       if (conn != null) {
-        // Inserir na ordem solicitada: temperatura, humidade, ldr,
-        // iluminacao_artificial, pessoas, tags_presentes, clima_ligado,
-        // clima_umidificando, clima_velocidade
         await conn.query(
           '''INSERT INTO dados_historicos 
              (temperatura, humidade, ldr, iluminacao_artificial, pessoas,
@@ -39,7 +36,6 @@ class HistoricoDao {
             climaVelocidade ?? 0,
           ],
         );
-        // Mensagem de sucesso removida para evitar poluição do console em modo background
       }
     } catch (e) {
       print("✗ Erro ao salvar dados históricos: $e");
