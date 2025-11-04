@@ -11,16 +11,22 @@ import 'package:pi_mds/controllers/sistema_iot_controller.dart';
 import 'package:pi_mds/ui/menu_interface_simple.dart';
 
 Future<void> main() async {
-  print('🚀 Iniciando Sistema IoT Dashboard...\n');
+  print(
+    '🚀 Iniciando Sistema IoT Dashboard...\n',
+  );
 
   try {
     print('📊 Configurando conexão MySQL...');
-    DatabaseConfig dbConfig = DatabaseConfig.defaultConfig;
-    DatabaseConnection dbConnection = DatabaseConnection(dbConfig);
+    DatabaseConfig dbConfig =
+        DatabaseConfig.defaultConfig;
+    DatabaseConnection dbConnection =
+        DatabaseConnection(dbConfig);
 
     bool conectado = await dbConnection.connect();
     if (!conectado) {
-      print('❌ Falha ao conectar com MySQL. Verifique as configurações.');
+      print(
+        '❌ Falha ao conectar com MySQL. Verifique as configurações.',
+      );
       return;
     }
 
@@ -28,30 +34,40 @@ Future<void> main() async {
     await dbConnection.createTables();
 
     print('📝 Inicializando DAOs...');
-    FuncionarioDao funcionarioDao = FuncionarioDao(dbConnection);
+    FuncionarioDao funcionarioDao =
+        FuncionarioDao(dbConnection);
     LogDao logDao = LogDao(dbConnection);
-    HistoricoDao historicoDao = HistoricoDao(dbConnection);
-    
+    HistoricoDao historicoDao = HistoricoDao(
+      dbConnection,
+    );
 
     print('🔧 Inicializando Services...');
-    SaidaService saidaService = SaidaService(capacidade: 500);
+    SaidaService saidaService = SaidaService(
+      capacidade: 500,
+    );
 
-    FirebaseService firebaseService = FirebaseService(
-      saidaService: saidaService,
+    FirebaseService firebaseService =
+        FirebaseService(
+          saidaService: saidaService,
+        );
+    FuncionarioService funcionarioService =
+        FuncionarioService(
+          funcionarioDao,
+          saidaService: saidaService,
+        );
+    LogService logService = LogService(
+      logDao,
+      funcionarioService,
     );
-    FuncionarioService funcionarioService = FuncionarioService(
-      funcionarioDao,
-      saidaService: saidaService,
-    );
-    LogService logService = LogService(logDao, funcionarioService);
 
     print('🎮 Inicializando Controller IoT...');
-    SistemaIotController sistemaController = SistemaIotController(
-      firebaseService: firebaseService,
-      funcionarioService: funcionarioService,
-      logService: logService,
-      historicoDao: historicoDao,
-    );
+    SistemaIotController sistemaController =
+        SistemaIotController(
+          firebaseService: firebaseService,
+          funcionarioService: funcionarioService,
+          logService: logService,
+          historicoDao: historicoDao,
+        );
 
     await sistemaController.inicializar();
 
@@ -59,7 +75,9 @@ Future<void> main() async {
     await Future.delayed(Duration(seconds: 2));
 
     sistemaController.setVerbose(false);
-    sistemaController.startBackgroundSync(interval: Duration(seconds: 3));
+    sistemaController.startBackgroundSync(
+      interval: Duration(seconds: 3),
+    );
 
     MenuInterface menu = MenuInterface(
       funcionarioService: funcionarioService,

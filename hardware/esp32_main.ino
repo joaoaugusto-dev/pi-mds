@@ -1,7 +1,13 @@
 // =====================================================
 // ESP32 IoT System with Firebase Integration
 // Autor: Sistema PI-MDS
-// Versão: 2.0 (Firebase)
+// Versão: 2.1 (Firebase com Streaming)
+// 
+// NOVIDADES v2.1:
+// - Suporte a Server-Sent Events (SSE) para streaming em tempo real
+// - Redução de polling e latência melhorada
+// - Fallback automático para polling quando stream não disponível
+// - Melhor eficiência de rede e bateria
 // =====================================================
 
 // === BIBLIOTECAS ===
@@ -161,16 +167,152 @@ enum SomBuzzer : uint8_t {
 
 // === FUNÇÕES FIREBASE ===
 
-String buildFirebaseUrl(const String& path) {
+// Variáveis para streaming
+HTTPClient* streamHttpCliente = nullptr;
+WiFiClient* streamWiFiClient = nullptr;
+bool streamAtivo = false;
+String ultimoEventoId = "";
+unsigned long ultimoKeepAlive = 0;
+const unsigned long STREAM_TIMEOUT = 60000; // 60 segundos
+
+String buildFirebaseUrl(const String& path, bool addAuth = true) {
   String url = "https://";
   url += FIREBASE_HOST;
   url += path;
   url += ".json";
-  if (strlen(FIREBASE_AUTH) > 0) {
+  if (addAuth && strlen(FIREBASE_AUTH) > 0) {
     url += "?auth=";
     url += FIREBASE_AUTH;
   }
   return url;
+}
+
+// Iniciar streaming de um caminho específico do Firebase
+bool iniciarStreamFirebase(const String& path) {
+  if (streamAtivo) {
+    debugPrint("Stream já ativo, fechando anterior...");
+    fecharStreamFirebase();
+  }
+
+  if (!flags.wifiOk) {
+    debugPrint("WiFi não conectado, impossível iniciar stream");
+    return false;
+  }
+
+  streamWiFiClient = new WiFiClient();
+  streamHttpCliente = new HTTPClient();
+
+  String url = buildFirebaseUrl(path, false); // SSE não usa auth na URL
+  if (strlen(FIREBASE_AUTH) > 0) {
+    url += "?auth=";
+    url += FIREBASE_AUTH;
+  }
+  
+  debugPrint("Iniciando stream Firebase: " + url);
+  
+  if (!streamHttpCliente->begin(*streamWiFiClient, url)) {
+    debugPrint("✗ Falha ao iniciar HTTP client para stream");
+    delete streamHttpCliente;
+    delete streamWiFiClient;
+    streamHttpCliente = nullptr;
+    streamWiFiClient = nullptr;
+    return false;
+  }
+
+  streamHttpCliente->addHeader("Accept", "text/event-stream");
+  streamHttpCliente->setTimeout(70000); // Timeout maior para stream
+
+  int httpCode = streamHttpCliente->GET();
+  
+  if (httpCode == HTTP_CODE_OK) {
+    streamAtivo = true;
+    ultimoKeepAlive = millis();
+    debugPrint("✓ Stream Firebase iniciado com sucesso");
+    return true;
+  } else {
+    debugPrint("✗ Erro ao iniciar stream: " + String(httpCode));
+    fecharStreamFirebase();
+    return false;
+  }
+}
+
+// Processar eventos do stream
+String processarStreamFirebase() {
+  if (!streamAtivo || streamHttpCliente == nullptr || streamWiFiClient == nullptr) {
+    return "";
+  }
+
+  if (!streamWiFiClient->connected()) {
+    debugPrint("⚠ Stream desconectado, reconectando...");
+    fecharStreamFirebase();
+    return "";
+  }
+
+  unsigned long agora = millis();
+  
+  // Verificar timeout
+  if (agora - ultimoKeepAlive > STREAM_TIMEOUT) {
+    debugPrint("⏱️ Timeout do stream, reconectando...");
+    fecharStreamFirebase();
+    return "";
+  }
+
+  // Ler dados disponíveis
+  if (streamWiFiClient->available()) {
+    String linha = streamWiFiClient->readStringUntil('\n');
+    linha.trim();
+    
+    if (linha.length() > 0) {
+      ultimoKeepAlive = agora; // Atualizar keep-alive
+      
+      // Processar keep-alive
+      if (linha.startsWith(":")) {
+        // Keep-alive comment, ignorar
+        return "";
+      }
+      
+      // Processar event ID
+      if (linha.startsWith("id:")) {
+        ultimoEventoId = linha.substring(3);
+        ultimoEventoId.trim();
+        return "";
+      }
+      
+      // Processar dados
+      if (linha.startsWith("data:")) {
+        String dados = linha.substring(5);
+        dados.trim();
+        
+        // Firebase envia alguns eventos de controle que devemos ignorar
+        if (dados == "null" || dados == "keep-alive" || dados.length() < 2) {
+          return "";
+        }
+        
+        debugPrint("📨 Evento recebido via stream: " + dados.substring(0, min(50, (int)dados.length())) + "...");
+        return dados;
+      }
+    }
+  }
+  
+  return "";
+}
+
+// Fechar stream
+void fecharStreamFirebase() {
+  if (streamHttpCliente != nullptr) {
+    streamHttpCliente->end();
+    delete streamHttpCliente;
+    streamHttpCliente = nullptr;
+  }
+  
+  if (streamWiFiClient != nullptr) {
+    streamWiFiClient->stop();
+    delete streamWiFiClient;
+    streamWiFiClient = nullptr;
+  }
+  
+  streamAtivo = false;
+  debugPrint("Stream Firebase fechado");
 }
 
 bool enviarDadosFirebase(const String& path, const String& dados, bool isPatch = false) {
@@ -1608,12 +1750,49 @@ void controleAutomaticoClima() {
 
 void verificarComandos() {
   unsigned long agora = millis();
-  if (agora - tempos[4] < INTERVALO_COMANDOS) return;
-  tempos[4] = agora;
-
+  
   if (!flags.wifiOk) return;
 
-  // Verificar comandos de iluminação
+  // Se o stream não está ativo, tentar iniciá-lo
+  static unsigned long ultimaTentativaStream = 0;
+  if (!streamAtivo && agora - ultimaTentativaStream > 30000) { // Tentar a cada 30s
+    ultimaTentativaStream = agora;
+    iniciarStreamFirebase("/comandos");
+  }
+
+  // Processar eventos do stream (se ativo)
+  if (streamAtivo) {
+    String eventoStream = processarStreamFirebase();
+    if (eventoStream.length() > 0) {
+      // Processar dados do stream
+      StaticJsonDocument<512> doc;
+      DeserializationError error = deserializeJson(doc, eventoStream);
+      
+      if (!error) {
+        // Verificar se há comandos de iluminação
+        if (doc.containsKey("iluminacao")) {
+          JsonObject cmdIlum = doc["iluminacao"];
+          processarComandoIluminacao(cmdIlum);
+        }
+        
+        // Verificar se há comandos do climatizador
+        if (doc.containsKey("climatizador")) {
+          JsonObject cmdClima = doc["climatizador"];
+          processarComandoClimatizador(cmdClima);
+        }
+      }
+    }
+    
+    // Ainda fazer polling ocasional como fallback (a cada 10 segundos)
+    if (agora - tempos[4] < 10000) return;
+  } else {
+    // Sem stream, usar polling normal
+    if (agora - tempos[4] < INTERVALO_COMANDOS) return;
+  }
+  
+  tempos[4] = agora;
+
+  // Verificar comandos de iluminação (fallback ou quando stream não disponível)
   String cmdIlum = lerDadosFirebase("/comandos/iluminacao");
   if (cmdIlum.length() > 0 && cmdIlum != "null") {
     // Parse do comando
@@ -2181,6 +2360,117 @@ void loop() {
 
   // Watchdog simples
   yield();
+}
+
+// === FUNÇÕES AUXILIARES PARA PROCESSAR COMANDOS ===
+
+void processarComandoIluminacao(JsonObject cmd) {
+  if (!cmd.containsKey("comando")) return;
+  
+  String comando = cmd["comando"].as<String>();
+  
+  if (comando == "auto") {
+    flags.modoManualIlum = false;
+    debugPrint("🔄 Iluminação: modo automático ativado (via stream)");
+    tocarSom(SOM_OK);
+    gerenciarIluminacao();
+    deletarDadosFirebase("/comandos/iluminacao");
+    
+  } else {
+    int nivel = comando.toInt();
+    if (nivel >= 0 && nivel <= 100) {
+      flags.modoManualIlum = true;
+      configurarRele(nivel);
+      debugPrint("💡 Iluminação manual: " + String(nivel) + "% (via stream)");
+      tocarSom(SOM_COMANDO);
+      deletarDadosFirebase("/comandos/iluminacao");
+    }
+  }
+}
+
+void processarComandoClimatizador(JsonObject cmd) {
+  if (!cmd.containsKey("comando")) return;
+  
+  String comando = cmd["comando"].as<String>();
+  debugPrint("📥 Processando comando climatizador via stream: " + comando);
+  
+  if (comando == "auto") {
+    flags.modoManualClima = false;
+    debugPrint("🔄 Climatizador: modo automático ativado (via stream)");
+    tocarSom(SOM_OK);
+    controleAutomaticoClima();
+    deletarDadosFirebase("/comandos/climatizador");
+    
+  } else if (comando == "power_on" || comando == "power") {
+    flags.modoManualClima = true;
+    if (!clima.ligado) {
+      enviarComandoIR(IR_POWER);
+      debugPrint("💨 Climatizador ligado via stream");
+      delay(1500);
+      
+      if (cmd.containsKey("velocidade") && clima.ligado) {
+        int velDesejada = cmd["velocidade"];
+        if (velDesejada >= 1 && velDesejada <= 3) {
+          int tentativas = 0;
+          while (clima.velocidade != velDesejada && tentativas < 5) {
+            if (enviarComandoIR(IR_VELOCIDADE)) tentativas++;
+            else break;
+            delay(800);
+          }
+        }
+      }
+    }
+    deletarDadosFirebase("/comandos/climatizador");
+    
+  } else if (comando == "power_off") {
+    flags.modoManualClima = true;
+    if (clima.ligado) {
+      enviarComandoIR(IR_POWER);
+      debugPrint("💤 Climatizador desligado via stream");
+    }
+    deletarDadosFirebase("/comandos/climatizador");
+    
+  } else if (comando == "velocidade" && clima.ligado) {
+    flags.modoManualClima = true;
+    if (cmd.containsKey("velocidade")) {
+      int velDesejada = cmd["velocidade"];
+      if (velDesejada >= 1 && velDesejada <= 3) {
+        int tentativas = 0;
+        while (clima.velocidade != velDesejada && tentativas < 5) {
+          if (enviarComandoIR(IR_VELOCIDADE)) tentativas++;
+          else break;
+          delay(800);
+        }
+      }
+    } else {
+      enviarComandoIR(IR_VELOCIDADE);
+    }
+    deletarDadosFirebase("/comandos/climatizador");
+    
+  } else if (comando == "umidificar" && clima.ligado) {
+    flags.modoManualClima = true;
+    enviarComandoIR(IR_UMIDIFICAR);
+    debugPrint("💧 Umidificação alterada via stream");
+    deletarDadosFirebase("/comandos/climatizador");
+    
+  } else if (comando == "timer" && clima.ligado) {
+    flags.modoManualClima = true;
+    enviarComandoIR(IR_TIMER);
+    debugPrint("⏲️ Timer alterado via stream");
+    deletarDadosFirebase("/comandos/climatizador");
+    
+  } else if (comando == "aleta_v" && clima.ligado) {
+    flags.modoManualClima = true;
+    enviarComandoIR(IR_ALETA_VERTICAL);
+    debugPrint("🔼 Aleta vertical alterada via stream");
+    deletarDadosFirebase("/comandos/climatizador");
+    
+  } else if (comando == "aleta_h" && clima.ligado) {
+    flags.modoManualClima = true;
+    enviarComandoIR(IR_ALETA_HORIZONTAL);
+    debugPrint("↔️ Aleta horizontal alterada via stream");
+    deletarDadosFirebase("/comandos/climatizador");
+  }
 }
 
 // === FUNÇÕES DE TESTE (OPCIONAL) ===

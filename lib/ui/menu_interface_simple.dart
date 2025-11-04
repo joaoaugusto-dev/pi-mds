@@ -680,7 +680,9 @@ class MenuInterface {
       print('2. 📈 Relatório Diário');
       print('3. 📅 Relatório por Período');
       print('4. 👤 Logs por Funcionário');
-      print('5. 🗂️ Saídas IoT (mensagens operacionais)');
+      print(
+        '5. 🗂️  Saídas IoT (mensagens operacionais)',
+      );
       print('0. ⬅️  Voltar');
       print('─' * _larguraPadrao);
 

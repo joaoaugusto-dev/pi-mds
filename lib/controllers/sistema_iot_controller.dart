@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import '../services/firebase_service.dart';
 import '../services/funcionario_service.dart';
 import '../services/log_service.dart';
@@ -20,11 +21,16 @@ class SistemaIotController {
   EstadoClimatizador? _ultimoEstadoClima;
   List<String> _ultimasTags = [];
   String _comandoIluminacaoAtual = 'auto';
-  bool verbose =
-  true;
+  bool verbose = true;
   bool _bgRunning = false;
-  Duration _bgInterval = Duration(seconds: 3);
 
+  // Gerenciamento de Streams
+  StreamSubscription<DadosSensores?>?
+  _sensoresSubscription;
+  StreamSubscription<EstadoClimatizador?>?
+  _climatizadorSubscription;
+  StreamSubscription<String?>?
+  _preferenciasRequestSubscription;
   
   DateTime? _ultimoTimestamp;
   String _ultimoHashTags = "";
@@ -443,6 +449,7 @@ class SistemaIotController {
   }
 
   
+  /// Inicia o monitoramento em tempo real usando Streams
   void startBackgroundSync({
     Duration interval = const Duration(
       seconds: 3,
@@ -450,27 +457,157 @@ class SistemaIotController {
   }) {
     if (_bgRunning) return;
     _bgRunning = true;
-    _bgInterval = interval;
     
-    () async {
-      while (_bgRunning) {
-        try {
-          
-          await processarSolicitacoesPreferenciasESP();
+    _log(
+      '🔄 Iniciando monitoramento em tempo real com Streams...',
+    );
 
-          
-          await processarDadosSensores();
-          await processarEstadoClimatizador();
-        } catch (e) {
-          _log('Erro no background sync: $e');
-        }
-        await Future.delayed(_bgInterval);
-      }
-    }();
+    // Stream de sensores
+    _sensoresSubscription = firebaseService
+        .streamSensores
+        .listen(
+          (dados) async {
+            if (dados != null) {
+              await _processarDadosSensoresStream(
+                dados,
+              );
+            }
+          },
+          onError: (e) => _log(
+            '✗ Erro no stream de sensores: $e',
+          ),
+        );
+
+    // Stream do climatizador
+    _climatizadorSubscription = firebaseService
+        .streamClimatizador
+        .listen(
+          (estado) {
+            if (estado != null) {
+              _ultimoEstadoClima = estado;
+              _log(
+                '✓ Estado climatizador atualizado via stream: $estado',
+              );
+            }
+          },
+          onError: (e) => _log(
+            '✗ Erro no stream do climatizador: $e',
+          ),
+        );
+
+    // Stream de solicitações de preferências
+    _preferenciasRequestSubscription = firebaseService
+        .streamPreferenciasRequest
+        .listen(
+          (requestData) async {
+            if (requestData != null &&
+                requestData.isNotEmpty &&
+                requestData != 'null') {
+              _log(
+                '📨 Solicitação de preferências recebida via stream',
+              );
+          await processarSolicitacoesPreferenciasESP();
+            }
+          },
+          onError: (e) => _log(
+            '✗ Erro no stream de preferências: $e',
+          ),
+        );
+
+    _log('✓ Streams iniciados com sucesso!');
   }
 
+  /// Para o monitoramento em tempo real e cancela as assinaturas
   void stopBackgroundSync() {
+    if (!_bgRunning) return;
+
+    _log(
+      '⏹️ Parando monitoramento em tempo real...',
+    );
     _bgRunning = false;
+
+    _sensoresSubscription?.cancel();
+    _climatizadorSubscription?.cancel();
+    _preferenciasRequestSubscription?.cancel();
+
+    firebaseService.stopAllStreams();
+
+    _log('✓ Streams parados com sucesso!');
+  }
+
+  /// Processa dados dos sensores recebidos via stream
+  Future<void> _processarDadosSensoresStream(
+    DadosSensores novosDados,
+  ) async {
+    if (!novosDados.dadosValidos) return;
+
+    // Verificar duplicatas
+    DateTime novoTimestamp = novosDados.timestamp;
+    String novoHashTags = novosDados.tags.join(
+      ',',
+    );
+
+    if (_ultimoTimestamp == novoTimestamp &&
+        _ultimoHashTags == novoHashTags) {
+      return; // Dados duplicados, ignorar
+    }
+
+    // Processar mudanças de tags
+    DateTime agora = DateTime.now();
+    if (_ultimaSensorData != null &&
+        _ultimoHashTags != novoHashTags &&
+        (_ultimoTimestamp == null ||
+            agora
+                    .difference(_ultimoTimestamp!)
+                    .inSeconds >
+                3)) {
+      List<LogEntry> logsGerados =
+          await logService.processarMudancasTags(
+            _ultimasTags,
+            novosDados.tags,
+          );
+      if (logsGerados.isNotEmpty) {
+        for (LogEntry log in logsGerados) {
+          _log(
+            '✓ Log ${log.tipo.toUpperCase()} registrado: ${log.nomeCompleto}',
+          );
+        }
+      }
+    }
+
+    // Atualizar estado
+    _ultimoTimestamp = novoTimestamp;
+    _ultimoHashTags = novoHashTags;
+    _ultimaSensorData = novosDados;
+    _ultimasTags = List.from(novosDados.tags);
+
+    // Salvar dados históricos
+    int iluminacaoArtificial =
+        novosDados.iluminacaoArtificial;
+    if (iluminacaoArtificial == 0 &&
+        novosDados.tags.isNotEmpty &&
+        _comandoIluminacaoAtual != 'auto') {
+      iluminacaoArtificial =
+          int.tryParse(_comandoIluminacaoAtual) ??
+          0;
+    }
+
+    await historicoDao.salvarDadosHistoricos(
+      novosDados,
+      climaLigado: _ultimoEstadoClima?.ligado,
+      climaUmidificando:
+          _ultimoEstadoClima?.umidificando,
+      climaVelocidade:
+          _ultimoEstadoClima?.velocidade,
+      iluminacaoArtificial: iluminacaoArtificial,
+    );
+
+    // Aplicar automação
+    await _aplicarAutomacao(novosDados);
+
+    _log(
+      '✓ Dados processados via stream: $novosDados',
+    );
   }
 
   void setVerbose(bool v) {
@@ -481,19 +618,24 @@ class SistemaIotController {
     if (verbose) print(msg);
   }
 
-  
+  /// Libera recursos quando o controller não é mais necessário
+  void dispose() {
+    stopBackgroundSync();
+    firebaseService.dispose();
+  }
 
   
+
+  /// Stream de dados em tempo real do sistema completo
   Stream<Map<String, dynamic>>
-  streamDadosTempoReal() async* {
-    while (true) {
-      await processarDadosSensores();
+  streamDadosTempoReal() {
+    return firebaseService.streamSensores.asyncMap((
+      _,
+    ) async {
+      // Quando sensores atualizam, buscar estado do climatizador também
       await processarEstadoClimatizador();
-      yield obterResumoSistema();
-      await Future.delayed(
-        Duration(seconds: 8),
-  );
-    }
+      return obterResumoSistema();
+    });
   }
 
   

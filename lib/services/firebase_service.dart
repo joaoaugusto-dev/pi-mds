@@ -1,6 +1,7 @@
 
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:async';
 import '../config/firebase_config.dart';
 import '../models/dados_sensores.dart';
 import '../models/estado_climatizador.dart';
@@ -11,6 +12,35 @@ class FirebaseService {
   final String baseUrl;
   final String authToken;
   final SaidaService? _saidaService;
+
+  // Controladores de streams
+  final _sensoresController =
+      StreamController<
+        DadosSensores?
+      >.broadcast();
+  final _climatizadorController =
+      StreamController<
+        EstadoClimatizador?
+      >.broadcast();
+  final _comandosIluminacaoController =
+      StreamController<
+        Map<String, dynamic>?
+      >.broadcast();
+  final _comandosClimatizadorController =
+      StreamController<
+        Map<String, dynamic>?
+      >.broadcast();
+  final _ultimaTagController =
+      StreamController<String?>.broadcast();
+  final _preferenciasRequestController =
+      StreamController<String?>.broadcast();
+
+  // Timers para polling
+  Timer? _sensoresTimer;
+  Timer? _climatizadorTimer;
+  Timer? _comandosTimer;
+  Timer? _ultimaTagTimer;
+  Timer? _preferenciasRequestTimer;
 
   FirebaseService({
     this.baseUrl = FirebaseConfig.baseUrl,
@@ -347,26 +377,220 @@ class FirebaseService {
     return false;
   }
 
-  Stream<DadosSensores?> streamSensores({
+  // ==========================================
+  // STREAMS - Monitoramento em tempo real
+  // ==========================================
+
+  /// Stream de dados dos sensores
+  Stream<DadosSensores?> get streamSensores {
+    _startSensoresStream();
+    return _sensoresController.stream;
+  }
+
+  /// Stream do estado do climatizador
+  Stream<EstadoClimatizador?>
+  get streamClimatizador {
+    _startClimatizadorStream();
+    return _climatizadorController.stream;
+  }
+
+  /// Stream de comandos de iluminação
+  Stream<Map<String, dynamic>?>
+  get streamComandosIluminacao {
+    _startComandosIluminacaoStream();
+    return _comandosIluminacaoController.stream;
+  }
+
+  /// Stream de comandos do climatizador
+  Stream<Map<String, dynamic>?>
+  get streamComandosClimatizador {
+    _startComandosClimatizadorStream();
+    return _comandosClimatizadorController.stream;
+  }
+
+  /// Stream da última tag lida
+  Stream<String?> get streamUltimaTag {
+    _startUltimaTagStream();
+    return _ultimaTagController.stream;
+  }
+
+  /// Stream de solicitações de preferências
+  Stream<String?> get streamPreferenciasRequest {
+    _startPreferenciasRequestStream();
+    return _preferenciasRequestController.stream;
+  }
+
+  // ==========================================
+  // INICIALIZADORES DE STREAMS
+  // ==========================================
+
+  void _startSensoresStream({
     Duration interval = const Duration(
       seconds: 2,
     ),
-  }) async* {
-    while (true) {
-      yield await lerSensores();
-      await Future.delayed(interval);
-    }
+  }) {
+    _sensoresTimer?.cancel();
+    _sensoresTimer = Timer.periodic(interval, (
+      _,
+    ) async {
+      final dados = await lerSensores();
+      if (!_sensoresController.isClosed) {
+        _sensoresController.add(dados);
+      }
+    });
   }
 
-  Stream<EstadoClimatizador?> streamClimatizador({
+  void _startClimatizadorStream({
     Duration interval = const Duration(
       seconds: 3,
     ),
-  }) async* {
-    while (true) {
-      yield await lerClimatizador();
-      await Future.delayed(interval);
-    }
+  }) {
+    _climatizadorTimer?.cancel();
+    _climatizadorTimer = Timer.periodic(
+      interval,
+      (_) async {
+        final estado = await lerClimatizador();
+        if (!_climatizadorController.isClosed) {
+          _climatizadorController.add(estado);
+        }
+      },
+    );
+  }
+
+  void _startComandosIluminacaoStream({
+    Duration interval = const Duration(
+      seconds: 2,
+    ),
+  }) {
+    _comandosTimer?.cancel();
+    _comandosTimer = Timer.periodic(interval, (
+      _,
+    ) async {
+      try {
+        final url = Uri.parse(
+          _buildUrl(
+            '${FirebaseConfig.comandosPath}/iluminacao',
+          ),
+        );
+        final response = await http.get(url);
+
+        if (response.statusCode == 200 &&
+            response.body != 'null') {
+          final Map<String, dynamic> comando =
+              jsonDecode(response.body);
+          if (!_comandosIluminacaoController
+              .isClosed) {
+            _comandosIluminacaoController.add(
+              comando,
+            );
+          }
+        }
+      } catch (e) {
+        print(
+          '✗ Erro ao monitorar comandos iluminação: $e',
+        );
+      }
+    });
+  }
+
+  void _startComandosClimatizadorStream({
+    Duration interval = const Duration(
+      seconds: 2,
+    ),
+  }) {
+    _comandosTimer?.cancel();
+    _comandosTimer = Timer.periodic(interval, (
+      _,
+    ) async {
+      try {
+        final url = Uri.parse(
+          _buildUrl(
+            '${FirebaseConfig.comandosPath}/climatizador',
+          ),
+        );
+        final response = await http.get(url);
+
+        if (response.statusCode == 200 &&
+            response.body != 'null') {
+          final Map<String, dynamic> comando =
+              jsonDecode(response.body);
+          if (!_comandosClimatizadorController
+              .isClosed) {
+            _comandosClimatizadorController.add(
+              comando,
+            );
+          }
+        }
+      } catch (e) {
+        print(
+          '✗ Erro ao monitorar comandos climatizador: $e',
+        );
+      }
+    });
+  }
+
+  void _startUltimaTagStream({
+    Duration interval = const Duration(
+      seconds: 1,
+    ),
+  }) {
+    _ultimaTagTimer?.cancel();
+    _ultimaTagTimer = Timer.periodic(interval, (
+      _,
+    ) async {
+      final tag = await lerUltimaTag();
+      if (!_ultimaTagController.isClosed &&
+          tag != null) {
+        _ultimaTagController.add(tag);
+      }
+    });
+  }
+
+  void _startPreferenciasRequestStream({
+    Duration interval = const Duration(
+      seconds: 2,
+    ),
+  }) {
+    _preferenciasRequestTimer?.cancel();
+    _preferenciasRequestTimer = Timer.periodic(
+      interval,
+      (_) async {
+        final request =
+            await lerPreferenciasRequest();
+        if (!_preferenciasRequestController
+                .isClosed &&
+            request != null &&
+            request != 'null') {
+          _preferenciasRequestController.add(
+            request,
+          );
+        }
+      },
+    );
+  }
+
+  // ==========================================
+  // GERENCIAMENTO DE STREAMS
+  // ==========================================
+
+  /// Para todos os streams ativos
+  void stopAllStreams() {
+    _sensoresTimer?.cancel();
+    _climatizadorTimer?.cancel();
+    _comandosTimer?.cancel();
+    _ultimaTagTimer?.cancel();
+    _preferenciasRequestTimer?.cancel();
+  }
+
+  /// Limpa recursos e fecha os controllers
+  void dispose() {
+    stopAllStreams();
+    _sensoresController.close();
+    _climatizadorController.close();
+    _comandosIluminacaoController.close();
+    _comandosClimatizadorController.close();
+    _ultimaTagController.close();
+    _preferenciasRequestController.close();
   }
 
   Future<String?> lerPreferenciasRequest() async {
