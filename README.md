@@ -839,72 +839,22 @@ await funcionarioService.desativarFuncionario(id);
 
 ---
 
-## 🤝 Contribuindo
-
-Contribuições são bem-vindas! Para contribuir:
-
-1. Fork o projeto
-2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
-3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
-4. Push para a branch (`git push origin feature/AmazingFeature`)
-5. Abra um Pull Request
-
----
-
 ## 📝 Licença
 
-Este projeto foi desenvolvido para fins educacionais como parte do Projeto Integrador.
+Este projeto foi desenvolvido para fins educacionais como parte do Projeto Integrado.
 
 ---
 
 ## 👥 Autores
 
-- **João Augusto** - [@joaoaugusto-dev](https://github.com/joaoaugusto-dev)
-
----
-
-## 🙏 Agradecimentos
-
-- Equipe do curso de Desenvolvimento de Sistemas
-- Comunidade Dart/Flutter
-- Espressif (ESP32)
-- Firebase Team
-- Todos os contribuidores de bibliotecas open-source utilizadas
-
----
-
-## 📞 Suporte
-
-Para suporte, abra uma [issue](https://github.com/joaoaugusto-dev/pi-mds/issues) no GitHub.
-
----
-
-## 🗺️ Roadmap
-
-### Versão 2.0 (Planejado)
-- [ ] Interface Web com Flutter Web
-- [ ] Aplicativo móvel (Android/iOS)
-- [ ] Suporte a múltiplos ESP32
-- [ ] Dashboard de análise avançada
-- [ ] Exportação de relatórios PDF
-- [ ] Integração com assistentes de voz
-- [ ] API REST completa
-- [ ] Sistema de notificações push
-- [ ] Modo offline com sincronização
-
-### Versão 2.1 (Futuro)
-- [ ] Machine Learning para predição de preferências
-- [ ] Integração com sensores adicionais (CO2, partículas)
-- [ ] Controle de persianas automáticas
-- [ ] Sistema de economia de energia
-- [ ] Relatórios de sustentabilidade
+- **João Augusto de Freitas** - [@joaoaugusto-dev](https://github.com/joaoaugusto-dev)
+- **Isadora Cabral dos Santos** - [@IsacabralSantos](https://github.com/IsacabralSantos)
+- **Kauan Leander Leandrini** - [@kauan0192](https://github.com/kauan0192)
 
 ---
 
 <div align="center">
 
 **[⬆ Voltar ao topo](#-sistema-iot-dashboard---controle-inteligente-de-ambiente)**
-
-Made with ❤️ and Dart
 
 </div>
