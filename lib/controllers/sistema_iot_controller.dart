@@ -194,11 +194,12 @@ class SistemaIotController {
   Future<void> _aplicarAutomacao(
     DadosSensores dados,
   ) async {
-    if (dados.tags.isEmpty) {
+    // CORREÇÃO: Não enviar comandos de iluminação quando em modo automático
+    // O ESP32 já gerencia a automação de iluminação baseado nas preferências
+    // que recebe via processarSolicitacaoPreferencias()
     
-      if (_comandoIluminacaoAtual == 'auto') {
-        await _aplicarAutomacaoIluminacao(0);
-      }
+    if (dados.tags.isEmpty) {
+      // Sem pessoas: não fazer nada, deixar o ESP32 desligar automaticamente
       return;
     }
 
@@ -212,14 +213,9 @@ class SistemaIotController {
     preferencias ??= await funcionarioService
         .calcularPreferenciasGrupo(dados.tags);
 
-    
-    if (_comandoIluminacaoAtual == 'auto') {
-      await _aplicarAutomacaoIluminacao(
-        preferencias.luminosidadeUtilizada,
-      );
-    }
-
-    
+    // IMPORTANTE: Não enviar comandos de iluminação aqui!
+    // O ESP32 já recebeu as preferências e gerencia a iluminação automaticamente
+    // Enviar comandos aqui sobrescreve o modo automático do ESP32
   }
 
   
@@ -281,20 +277,9 @@ class SistemaIotController {
     }
   }
 
-  Future<void> _aplicarAutomacaoIluminacao(
-    int luminosidadeDesejada,
-  ) async {
-    String novoComando = luminosidadeDesejada
-        .toString();
-    if (_comandoIluminacaoAtual != novoComando) {
-      await firebaseService
-          .enviarComandoIluminacao(novoComando);
-      _comandoIluminacaoAtual = novoComando;
-      _log(
-        '🔆 Automação iluminação: $luminosidadeDesejada%',
-      );
-    }
-  }
+  // NOTA: Função _aplicarAutomacaoIluminacao() removida
+  // O ESP32 gerencia toda a automação de iluminação internamente
+  // baseado nas preferências recebidas via Firebase
 
   
   Future<bool> definirIluminacaoManual(

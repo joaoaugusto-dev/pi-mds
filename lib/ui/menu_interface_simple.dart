@@ -38,10 +38,12 @@ class MenuInterface {
     sistemaController.setVerbose(false);
 
     _dashboardSubs = sistemaController.streamDadosTempoReal().listen((data) async {
+          PreferenciasGrupo? prefs;
       try {
         final tagsVal = data['tags_presentes'] ?? data['tags'] ?? [];
         if (tagsVal is List && tagsVal.isNotEmpty) {
-          final prefs = await funcionarioService.calcularPreferenciasGrupo(
+              prefs = await funcionarioService
+                  .calcularPreferenciasGrupo(
             tagsVal.map((e) => e.toString()).toList(),
           );
           final List<String> nomesPresentes = prefs.funcionariosPresentes
@@ -61,7 +63,9 @@ class MenuInterface {
       final horario = DateTime.now().toString().substring(11, 19);
       print(_padInner('Dashboard IoT - $horario'));
       print(_criarLinhaBorda(meio: true));
-      print(_formatResumoSistema(data));
+          print(
+            _formatResumoSistema(data, prefs),
+          );
       print(_criarLinhaBorda(meio: true));
       print(_padInner('Pressione ENTER para sair do dashboard'));
       print(_criarLinhaBorda(fim: true));
@@ -244,7 +248,10 @@ class MenuInterface {
     return texto + ' ' * espacos;
   }
 
-  String _formatResumoSistema(Map<String, dynamic> data) {
+  String _formatResumoSistema(
+    Map<String, dynamic> data, [
+    PreferenciasGrupo? preferencias,
+  ]) {
     final sensores = data['sensores'] as Map<String, dynamic>?;
     final climatizador = data['climatizador'] as Map<String, dynamic>?;
     final comandoIlum = data['comando_iluminacao_atual'] ?? 'auto';
@@ -297,6 +304,20 @@ class MenuInterface {
 
     final linha2 = 'Funcionarios: $funcionariosStr';
     lines.add(_padInner(linha2));
+
+    // Adiciona médias setadas na sala
+    if (preferencias != null &&
+        preferencias.temFuncionariosCadastrados) {
+      final tempSetada =
+          preferencias.temperaturaMedia != null
+          ? '${preferencias.temperaturaMedia!.toStringAsFixed(1)}°C'
+          : 'N/A';
+      final lumiSetada =
+          '${preferencias.luminosidadeUtilizada}%';
+      final linha2_5 =
+          'Medias Setadas - Temp: ${pad(tempSetada, 8)}  Luz: ${pad(lumiSetada, 6)}';
+      lines.add(_padInner(linha2_5));
+    }
 
     if (climatizador != null) {
       final ligado = climatizador['ligado'] == true ? '🟢 LIGADO' : '🔴 DESLIGADO';

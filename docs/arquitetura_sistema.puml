@@ -1,0 +1,128 @@
+@startuml Arquitetura_Sistema_IoT
+
+!define RECTANGLE class
+
+skinparam backgroundColor #FEFEFE
+skinparam handwritten false
+skinparam shadowing false
+
+skinparam component {
+    BackgroundColor<<view>> #95E1D3
+    BackgroundColor<<controller>> #4ECDC4
+    BackgroundColor<<model>> #FFD93D
+    BackgroundColor<<service>> #A8DADC
+    BackgroundColor<<dao>> #6BCF7F
+    BackgroundColor<<database>> #45B7D1
+    BackgroundColor<<hardware>> #FF6B6B
+    BorderColor #333333
+    ArrowColor #333333
+}
+
+title Arquitetura MVC - Sistema IoT Dashboard
+
+package "Hardware Layer" <<hardware>> {
+    component [ESP32] as ESP32
+    component [Sensores:\nDHT22, LDR,\nHC-SR501, RFID] as SENSORS
+    component [Atuadores:\nRelés, PWM] as ACTUATORS
+}
+
+package "Data Sources" {
+    database "Firebase\nRealtime DB" as FIREBASE <<database>>
+    database "MySQL\nDatabase" as MYSQL <<database>>
+}
+
+package "View Layer" <<view>> {
+    component [MenuInterfaceSimple] as UI
+}
+
+package "Controller Layer" <<controller>> {
+    component [SistemaIotController] as CTRL
+}
+
+package "Service Layer" <<service>> {
+    component [FirebaseService] as FS
+    component [FuncionarioService] as FUNCS
+    component [LogService] as LS
+    component [SaidaService] as SS
+}
+
+package "DAO Layer" <<dao>> {
+    component [FuncionarioDao] as FDAO
+    component [HistoricoDao] as HDAO
+    component [LogDao] as LDAO
+    component [PreferenciaTagDao] as PDAO
+}
+
+package "Model Layer" <<model>> {
+    component [DadosSensores] as M1
+    component [EstadoClimatizador] as M2
+    component [Funcionario] as M3
+    component [LogEntry] as M4
+    component [PreferenciasGrupo] as M5
+}
+
+' Hardware connections
+ESP32 --> SENSORS
+ESP32 --> ACTUATORS
+ESP32 <--> FIREBASE : WiFi
+
+' Service to Data connections
+FS <--> FIREBASE : HTTP/HTTPS
+FDAO --> MYSQL
+HDAO --> MYSQL
+LDAO --> MYSQL
+PDAO --> MYSQL
+
+' Controller connections
+FS --> CTRL : Stream
+FUNCS --> CTRL
+LS --> CTRL
+SS --> CTRL
+HDAO --> CTRL
+
+' Service internal connections
+FDAO --> FUNCS
+PDAO --> FUNCS
+LDAO --> LS
+
+' View connection
+CTRL --> UI : Update
+
+' Model usage (dotted lines)
+M1 ..> CTRL : uses
+M2 ..> CTRL : uses
+M3 ..> FUNCS : uses
+M4 ..> LS : uses
+M5 ..> FUNCS : uses
+
+note right of ESP32
+  Dispositivo IoT com:
+  - WiFi integrado
+  - Múltiplos sensores
+  - Controle de atuadores
+end note
+
+note bottom of CTRL
+  Orquestrador central:
+  - Gerencia streams
+  - Processa lógica de negócio
+  - Coordena todas as camadas
+end note
+
+note bottom of FIREBASE
+  Realtime Database:
+  - Dados de sensores
+  - Estado climatizador
+  - Comandos
+  - Preferências
+end note
+
+note bottom of MYSQL
+  Persistência:
+  - Histórico de dados
+  - Funcionários
+  - Logs do sistema
+  - Preferências por tag
+end note
+
+@enduml

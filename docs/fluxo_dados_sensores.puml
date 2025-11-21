@@ -1,0 +1,86 @@
+@startuml Fluxo_Dados_Sensores
+
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam sequenceMessageAlign center
+
+title Fluxo de Dados - Leitura de Sensores e Aplicação de Preferências
+
+actor "ESP32" as ESP
+participant "Firebase\nRealtime DB" as FB
+participant "FirebaseService" as FS
+participant "SistemaIot\nController" as CTRL
+participant "Funcionario\nService" as FUNCS
+participant "Historico\nDao" as HDAO
+participant "MySQL" as DB
+participant "Interface\nUsuário" as UI
+
+== Leitura de Sensores ==
+
+ESP -> FB: PUT /sensores/dados\n{temp: 25.5, umid: 60,\nlux: 450, tags: [TAG123]}
+activate FB
+
+loop Polling a cada 5 segundos
+    FS -> FB: GET /sensores/dados
+    FB --> FS: JSON Data
+end
+
+FS -> CTRL: Stream<DadosSensores>
+activate CTRL
+
+CTRL -> CTRL: Validar dados
+note right: Verificar se dados\nestão dentro dos limites
+
+== Processamento de Preferências ==
+
+alt Tags RFID detectadas
+    CTRL -> FUNCS: buscarPorTags([TAG123])
+    activate FUNCS
+    
+    FUNCS -> DB: SELECT funcionarios\nWHERE tag_rfid IN (...)
+    DB --> FUNCS: List<Funcionario>
+    
+    FUNCS -> DB: SELECT preferencias\nWHERE tag_rfid IN (...)
+    DB --> FUNCS: List<PreferenciasGrupo>
+    
+    FUNCS -> FUNCS: calcularPreferenciaOtima()
+    note right: Média ponderada por\nprioridade de grupo
+    
+    FUNCS --> CTRL: ConfiguracaoIdeal
+    deactivate FUNCS
+    
+    CTRL -> FS: putComandoClimatizador(\n{temp: 23, modo: "auto"})
+    FS -> FB: PUT /comandos/climatizador
+    FB -> ESP: ESP32 lê e aplica
+end
+
+== Persistência ==
+
+par Salvar dados em paralelo
+    CTRL -> HDAO: inserir(dadosSensores)
+    activate HDAO
+    HDAO -> DB: INSERT INTO dados_historicos
+    DB --> HDAO: OK
+    HDAO --> CTRL: Sucesso
+    deactivate HDAO
+and
+    CTRL -> CTRL: registrarLog(\n"Dados processados")
+end
+
+== Atualização de Interface ==
+
+CTRL -> UI: Atualizar dashboard
+activate UI
+UI -> UI: Renderizar dados
+note right: Mostrar temperatura,\numidade, luminosidade,\npessoas presentes
+deactivate UI
+
+deactivate CTRL
+deactivate FB
+
+note over ESP, UI
+  Ciclo se repete a cada 5 segundos
+  enquanto o monitoramento estiver ativo
+end note
+
+@enduml

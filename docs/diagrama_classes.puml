@@ -1,0 +1,256 @@
+@startuml Classes_MVC
+
+!theme plain
+skinparam backgroundColor #FEFEFE
+skinparam classBackgroundColor<<controller>> #4ECDC4
+skinparam classBackgroundColor<<service>> #A8DADC
+skinparam classBackgroundColor<<dao>> #6BCF7F
+skinparam classBackgroundColor<<model>> #FFD93D
+skinparam classBackgroundColor<<view>> #95E1D3
+
+title Diagrama de Classes - Padrão MVC
+
+package "Controller Layer" <<controller>> {
+    class SistemaIotController {
+        - firebaseService: FirebaseService
+        - funcionarioService: FuncionarioService
+        - logService: LogService
+        - historicoDao: HistoricoDao
+        - ultimaSensorData: DadosSensores?
+        - ultimoEstadoClima: EstadoClimatizador?
+        - ultimasTags: List<String>
+        - comandoIluminacaoAtual: String
+        - bgRunning: bool
+        --
+        + iniciarMonitoramento(): void
+        + pararMonitoramento(): void
+        + enviarComandoIluminacao(comando: String): Future<void>
+        + enviarComandoClimatizador(config: Map): Future<void>
+        + solicitarPreferencias(tagRfid: String): Future<void>
+        + obterHistorico(inicio: DateTime, fim: DateTime): Future<List>
+        + obterEstatisticas(): Future<Map>
+        - processarDadosSensores(dados: DadosSensores): void
+        - processarEstadoClimatizador(estado: EstadoClimatizador): void
+        - iniciarProcessamentoBackground(): void
+    }
+}
+
+package "Service Layer" <<service>> {
+    class FirebaseService {
+        - baseUrl: String
+        - authToken: String
+        - sensoresController: StreamController
+        - climatizadorController: StreamController
+        - sensoresTimer: Timer?
+        --
+        + startSensoresPolling(interval: Duration): void
+        + startClimatizadorPolling(interval: Duration): void
+        + stopAllPolling(): void
+        + getSensoresData(): Future<DadosSensores?>
+        + getEstadoClimatizador(): Future<EstadoClimatizador?>
+        + putComandoIluminacao(comando: String): Future<bool>
+        + putComandoClimatizador(config: Map): Future<bool>
+        + getSensoresStream(): Stream<DadosSensores?>
+        - get(path: String): Future<Map?>
+        - put(path: String, data: Map): Future<bool>
+    }
+
+    class FuncionarioService {
+        - funcionarioDao: FuncionarioDao
+        - preferenciaTagDao: PreferenciaTagDao
+        --
+        + buscarPorTags(tags: List<String>): Future<List<Funcionario>>
+        + obterPreferencias(tags: List<String>): Future<List<PreferenciasGrupo>>
+        + calcularPreferenciaOtima(prefs: List): PreferenciasGrupo?
+        + buscarFuncionario(id: int): Future<Funcionario?>
+        + listarTodos(): Future<List<Funcionario>>
+    }
+
+    class LogService {
+        - logDao: LogDao
+        --
+        + registrar(tipo: String, msg: String, contexto: Map?): Future<void>
+        + info(msg: String, contexto: Map?): Future<void>
+        + warning(msg: String, contexto: Map?): Future<void>
+        + error(msg: String, contexto: Map?): Future<void>
+        + command(msg: String, contexto: Map?): Future<void>
+        + obterRecentes(limite: int): Future<List<LogEntry>>
+    }
+
+    class SaidaService {
+        - buffer: List<String>
+        - capacidade: int
+        --
+        + adicionar(mensagem: String): void
+        + limpar(): void
+        + exibir(): void
+        + obterBuffer(): List<String>
+    }
+}
+
+package "DAO Layer" <<dao>> {
+    class FuncionarioDao {
+        - dbConnection: DatabaseConnection
+        --
+        + inserir(funcionario: Funcionario): Future<int>
+        + atualizar(funcionario: Funcionario): Future<bool>
+        + deletar(id: int): Future<bool>
+        + buscarPorId(id: int): Future<Funcionario?>
+        + buscarPorTag(tagRfid: String): Future<Funcionario?>
+        + listarTodos(): Future<List<Funcionario>>
+        + listarAtivos(): Future<List<Funcionario>>
+    }
+
+    class HistoricoDao {
+        - dbConnection: DatabaseConnection
+        --
+        + inserir(dados: DadosSensores): Future<int>
+        + buscarPorPeriodo(inicio: DateTime, fim: DateTime): Future<List>
+        + buscarUltimos(limite: int): Future<List>
+        + calcularMedias(inicio: DateTime, fim: DateTime): Future<Map>
+        + obterEstatisticas(): Future<Map>
+    }
+
+    class LogDao {
+        - dbConnection: DatabaseConnection
+        --
+        + inserir(log: LogEntry): Future<int>
+        + buscarPorTipo(tipo: String): Future<List<LogEntry>>
+        + buscarPorPeriodo(inicio: DateTime, fim: DateTime): Future<List<LogEntry>>
+        + listarRecentes(limite: int): Future<List<LogEntry>>
+        + deletarAntigos(dataLimite: DateTime): Future<int>
+    }
+
+    class PreferenciaTagDao {
+        - dbConnection: DatabaseConnection
+        --
+        + inserir(pref: PreferenciasGrupo): Future<bool>
+        + atualizar(pref: PreferenciasGrupo): Future<bool>
+        + buscarPorTag(tagRfid: String): Future<PreferenciasGrupo?>
+        + listarTodas(): Future<List<PreferenciasGrupo>>
+        + deletar(tagRfid: String): Future<bool>
+    }
+}
+
+package "Model Layer" <<model>> {
+    class DadosSensores {
+        + temperatura: double
+        + humidade: double
+        + luminosidade: int
+        + ldr: int
+        + pessoas: int
+        + tags: List<String>
+        + timestamp: DateTime
+        + dadosValidos: bool
+        + iluminacaoArtificial: int
+        --
+        + fromJson(json: Map): DadosSensores
+        + toJson(): Map<String, dynamic>
+        + toString(): String
+    }
+
+    class EstadoClimatizador {
+        + temperatura: double
+        + temperaturaConfiguracao: double
+        + modo: String
+        + velocidade: int
+        + status: bool
+        + timestamp: DateTime
+        --
+        + fromJson(json: Map): EstadoClimatizador
+        + toJson(): Map<String, dynamic>
+        + toString(): String
+    }
+
+    class Funcionario {
+        + id: int?
+        + nome: String
+        + tag_rfid: String
+        + grupo: String
+        + ativo: bool
+        + created_at: DateTime?
+        --
+        + fromMap(map: Map): Funcionario
+        + toMap(): Map<String, dynamic>
+    }
+
+    class LogEntry {
+        + tipo: String
+        + mensagem: String
+        + timestamp: DateTime
+        + contexto: Map<String, dynamic>?
+        --
+        + fromMap(map: Map): LogEntry
+        + toMap(): Map<String, dynamic>
+        + toString(): String
+    }
+
+    class PreferenciasGrupo {
+        + tag_rfid: String
+        + temperaturaIdeal: double
+        + temperaturaMin: double
+        + temperaturaMax: double
+        + iluminacaoMinima: int
+        + prioridade: int
+        --
+        + fromMap(map: Map): PreferenciasGrupo
+        + toMap(): Map<String, dynamic>
+    }
+}
+
+package "View Layer" <<view>> {
+    class MenuInterfaceSimple {
+        - controller: SistemaIotController
+        - saidaService: SaidaService
+        --
+        + exibirMenu(): Future<void>
+        + exibirDashboard(): void
+        + exibirLogs(): Future<void>
+        + exibirHistorico(): Future<void>
+        + controlarIluminacao(): Future<void>
+        + controlarClimatizador(): Future<void>
+        + gerenciarFuncionarios(): Future<void>
+        - limparTela(): void
+        - aguardarEnter(): void
+    }
+}
+
+' Relationships
+SistemaIotController --> FirebaseService
+SistemaIotController --> FuncionarioService
+SistemaIotController --> LogService
+SistemaIotController --> HistoricoDao
+
+FirebaseService ..> DadosSensores : creates
+FirebaseService ..> EstadoClimatizador : creates
+
+FuncionarioService --> FuncionarioDao
+FuncionarioService --> PreferenciaTagDao
+FuncionarioService ..> Funcionario : uses
+FuncionarioService ..> PreferenciasGrupo : uses
+
+LogService --> LogDao
+LogService ..> LogEntry : creates
+
+MenuInterfaceSimple --> SistemaIotController
+MenuInterfaceSimple --> SaidaService
+
+SistemaIotController ..> DadosSensores : processes
+SistemaIotController ..> EstadoClimatizador : processes
+
+note right of SistemaIotController
+  Controlador central que orquestra
+  toda a lógica de negócio do sistema
+end note
+
+note bottom of FirebaseService
+  Gerencia comunicação em tempo real
+  com Firebase via HTTP polling
+end note
+
+note bottom of FuncionarioDao
+  Todas as DAOs seguem o padrão
+  de acesso a dados com MySQL
+end note
+
+@enduml

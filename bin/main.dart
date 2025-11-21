@@ -9,7 +9,6 @@ import 'package:pi_mds/services/saida_service.dart';
 import 'package:pi_mds/services/log_service.dart';
 import 'package:pi_mds/controllers/sistema_iot_controller.dart';
 import 'package:pi_mds/ui/menu_interface_simple.dart';
-
 Future<void> main() async {
   print(
     '🚀 Iniciando Sistema IoT Dashboard...\n',

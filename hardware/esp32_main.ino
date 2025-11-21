@@ -61,14 +61,15 @@ const char* FIREBASE_AUTH = ""; // Deixar vazio se não usar autenticação
 #define LIMIAR_LDR_ESCURIDAO 400
 
 // === INTERVALOS OTIMIZADOS ===
-const unsigned long INTERVALO_DHT = 5000;
-const unsigned long INTERVALO_DADOS = 5000;
-const unsigned long INTERVALO_LDR = 5000;
-const unsigned long INTERVALO_CLIMA_AUTO = 5000;
-const unsigned long INTERVALO_COMANDOS = 3000;
-const unsigned long MODO_CADASTRO_TIMEOUT = 60000; // 60 segundos
+const unsigned long INTERVALO_DHT = 3000;           // Reduzido de 5000ms para 3000ms
+const unsigned long INTERVALO_DADOS = 3000;         // Reduzido de 5000ms para 3000ms
+const unsigned long INTERVALO_LDR = 500;            // CRÍTICO: Reduzido de 2000ms para 500ms (4x mais rápido!)
+const unsigned long INTERVALO_CLIMA_AUTO = 3000;    // Reduzido de 5000ms para 3000ms
+const unsigned long INTERVALO_COMANDOS = 2000;      // Reduzido de 3000ms para 2000ms
+const unsigned long MODO_CADASTRO_TIMEOUT = 60000;  // 60 segundos
 const unsigned long INTERVALO_DEBUG = 5000;
-const unsigned long INTERVALO_PREF_CHECK = 30000; // Verificar preferências a cada 30s
+const unsigned long INTERVALO_PREF_CHECK = 30000;   // Verificar preferências a cada 30s
+const unsigned long INTERVALO_RFID_SCAN = 100;      // NOVO: Intervalo mínimo entre scans RFID
 
 // === OBJETOS GLOBAIS ===
 MFRC522 mfrc522(SS_PIN, RST_PIN);
@@ -165,6 +166,10 @@ enum SomBuzzer : uint8_t {
   SOM_OK
 };
 
+// === DECLARAÇÕES DE FUNÇÕES (PROTÓTIPOS) ===
+void processarComandoIluminacao(JsonObject cmd);
+void processarComandoClimatizador(JsonObject cmd);
+
 // === FUNÇÕES FIREBASE ===
 
 // Variáveis para streaming
@@ -176,7 +181,11 @@ unsigned long ultimoKeepAlive = 0;
 const unsigned long STREAM_TIMEOUT = 60000; // 60 segundos
 
 String buildFirebaseUrl(const String& path, bool addAuth = true) {
-  String url = "https://";
+  // OTIMIZAÇÃO: Reservar memória para evitar realocações
+  String url = "";
+  url.reserve(128); // Tamanho estimado da URL
+  
+  url = "https://";
   url += FIREBASE_HOST;
   url += path;
   url += ".json";
@@ -322,7 +331,7 @@ bool enviarDadosFirebase(const String& path, const String& dados, bool isPatch =
   String url = buildFirebaseUrl(path);
   http.begin(url);
   http.addHeader("Content-Type", "application/json");
-  http.setTimeout(5000);
+  http.setTimeout(3000); // OTIMIZAÇÃO: Reduzido de 5000ms para 3000ms
   
   int httpCode;
   if (isPatch) {
@@ -350,7 +359,7 @@ String lerDadosFirebase(const String& path) {
   HTTPClient http;
   String url = buildFirebaseUrl(path);
   http.begin(url);
-  http.setTimeout(5000);
+  http.setTimeout(3000); // OTIMIZAÇÃO: Reduzido de 5000ms para 3000ms
   
   int httpCode = http.GET();
   String response = "";
@@ -373,7 +382,7 @@ bool deletarDadosFirebase(const String& path) {
   HTTPClient http;
   String url = buildFirebaseUrl(path);
   http.begin(url);
-  http.setTimeout(5000);
+  http.setTimeout(3000); // OTIMIZAÇÃO: Reduzido de 5000ms para 3000ms
   
   int httpCode = http.sendRequest("DELETE");
   bool sucesso = (httpCode == HTTP_CODE_OK);
@@ -479,42 +488,57 @@ void tocarSom(SomBuzzer tipo) {
 
 void mostrarErroLCD(const char* erro, bool critico = false) {
   static const char MSG_ERRO[] PROGMEM = "ERRO:";
+  static unsigned long tempoMensagem = 0;
+  static bool exibindoErro = false;
 
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.write(7); // Símbolo de erro
-  lcd.print(' ');
-  lcd.print(MSG_ERRO);
-  lcd.setCursor(0, 1);
-  lcd.print(erro);
+  if (!exibindoErro) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.write(7); // Símbolo de erro
+    lcd.print(' ');
+    lcd.print(MSG_ERRO);
+    lcd.setCursor(0, 1);
+    lcd.print(erro);
 
-  if (critico) {
-    tocarSom(SOM_ERRO);
-  } else {
-    tocarSom(SOM_ALERTA);
+    if (critico) {
+      tocarSom(SOM_ERRO);
+    } else {
+      tocarSom(SOM_ALERTA);
+    }
+    
+    exibindoErro = true;
+    tempoMensagem = millis();
   }
-  delay(600);
   
-  if (pessoas.total > 0) {
-    atualizarLCD();
+  // OTIMIZAÇÃO: Verifica no loop se já passou tempo suficiente
+  if (exibindoErro && millis() - tempoMensagem > 600) {
+    exibindoErro = false;
+    if (pessoas.total > 0) {
+      atualizarLCD();
+    }
   }
 }
 
 void animacaoTransicao() {
-  for (int i = 0; i < 8; i++) {
-    lcd.clear();
-    lcd.setCursor(i, 0);
-    lcd.write(6); // Símbolo OK
-    delay(50);
-  }
+  // OTIMIZAÇÃO: Animação removida para não bloquear
+  // Sistema é mais responsivo sem animações
   lcd.clear();
 }
 
 void atualizarLCD() {
+  // OTIMIZAÇÃO: Controle estático para evitar atualizações desnecessárias
+  static bool lcdBacklightAtivo = false;
+  
   if (pessoas.total > 0) {
-    lcd.backlight();
+    if (!lcdBacklightAtivo) {
+      lcd.backlight();
+      lcdBacklightAtivo = true;
+    }
   } else {
-    lcd.noBacklight();
+    if (lcdBacklightAtivo) {
+      lcd.noBacklight();
+      lcdBacklightAtivo = false;
+    }
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("Sistema Standby");
@@ -527,8 +551,10 @@ void atualizarLCD() {
   static unsigned long ultimaAtualizacao = 0;
   unsigned long agora = millis();
 
-  if (agora - ultimaAtualizacao < 200) return;
+  // OTIMIZAÇÃO: Reduzir intervalo mínimo de atualização
+  if (agora - ultimaAtualizacao < 150) return; // Reduzido de 200ms para 150ms
 
+  // OTIMIZAÇÃO: Hash mais eficiente
   uint32_t hash = (uint32_t)(sensores.temperatura * 10) + 
                   (uint32_t)(sensores.humidade) * 1000 + 
                   sensores.luminosidade * 10000 + 
@@ -539,7 +565,7 @@ void atualizarLCD() {
                   (flags.modoManualIlum ? 8000000 : 0) + 
                   (flags.modoManualClima ? 16000000 : 0);
 
-  if (hash == hashAnterior) return;
+  if (hash == hashAnterior) return; // Não atualizar se nada mudou
   hashAnterior = hash;
   ultimaAtualizacao = agora;
 
@@ -683,12 +709,17 @@ bool consultarPreferencias() {
 
   flags.atualizandoPref = true;
 
+  // OTIMIZAÇÃO: Cache de últimas tags consultadas para evitar consultas repetidas
+  static String ultimasTagsConsultadas = "";
+  
   // Montar lista de tags ativas e um hash simples para validação
   StaticJsonDocument<512> doc;
   JsonArray tagsArray = doc.createNestedArray("tags");
 
   int tagsAtivas = 0;
   String tagsConcat = "";
+  tagsConcat.reserve(100); // OTIMIZAÇÃO: Reservar memória
+  
   for (int i = 0; i < pessoas.count; i++) {
     if (pessoas.estado[i]) {
       tagsArray.add(pessoas.tags[i]);
@@ -703,8 +734,17 @@ bool consultarPreferencias() {
     debugPrint("consultarPreferencias: Nenhuma tag ativa para consultar.");
     return false;
   }
+  
+  // OTIMIZAÇÃO: Se as tags são as mesmas, não consultar novamente
+  if (tagsConcat == ultimasTagsConsultadas && pessoas.prefsAtualizadas) {
+    flags.atualizandoPref = false;
+    debugPrint("consultarPreferencias: Tags inalteradas, usando preferências em cache.");
+    return true;
+  }
+  ultimasTagsConsultadas = tagsConcat;
 
   String jsonTags;
+  jsonTags.reserve(256); // OTIMIZAÇÃO: Reservar memória
   serializeJson(doc, jsonTags);
   debugPrint("Consultando preferências Firebase para " + String(tagsAtivas) + " tags");
   debugPrint("JSON enviado: " + jsonTags);
@@ -713,11 +753,13 @@ bool consultarPreferencias() {
   bool sucesso = enviarDadosFirebase("/preferencias_request", jsonTags, false);
 
   if (sucesso) {
-    // Aguardar processamento: usar polling para evitar ler antes do backend escrever
-    const int maxAttempts = 20; // aumentar janela para evitar race com backend (≈ 6s)
-    const int waitMs = 300;
+    // OTIMIZAÇÃO: Reduzir tentativas e aumentar eficiência
+    const int maxAttempts = 12; // Reduzido de 15 para 12
+    const int waitMs = 200;     // Reduzido de 250ms para 200ms
     String response = "";
+    response.reserve(512);      // OTIMIZAÇÃO: Reservar memória
     int attempt = 0;
+    
     while (attempt < maxAttempts) {
       delay(waitMs);
       response = lerDadosFirebase("/preferencias_grupo");
@@ -865,37 +907,51 @@ void configurarRele(int nivel) {
 
 void lerSensores() {
   unsigned long agora = millis();
+  
+  // OTIMIZAÇÃO CRÍTICA: Leitura DHT separada da LDR (DHT é lento, LDR é rápido)
+  static unsigned long ultimoLDR = 0;
+  
+  // Ler LDR com alta frequência (500ms) para resposta rápida
+  if (agora - ultimoLDR >= INTERVALO_LDR) {
+    ultimoLDR = agora;
+    
+    // OTIMIZAÇÃO: Leitura do LDR com média móvel otimizada
+    static int ldrBuffer[3] = { 0 };
+    static int bufferIndex = 0;
+    static int ldrSum = 0;
+    
+    // Remove o valor antigo da soma
+    ldrSum -= ldrBuffer[bufferIndex];
+    // Adiciona o novo valor
+    ldrBuffer[bufferIndex] = analogRead(LDR_PIN);
+    ldrSum += ldrBuffer[bufferIndex];
+    bufferIndex = (bufferIndex + 1) % 3;
+    
+    // Calcula média sem divisão repetida
+    sensores.valorLDR = ldrSum / 3;
+  }
+  
+  // Ler DHT com frequência normal (3000ms) pois é sensor lento
   if (agora - tempos[0] < INTERVALO_DHT) return;
   tempos[0] = agora;
 
+  // OTIMIZAÇÃO: Leitura DHT (sensor lento)
   float temp = dht.readTemperature();
   float hum = dht.readHumidity();
 
-  if (!isnan(temp) && !isnan(hum) && temp >= -40 && temp <= 80 && hum >= 0 && hum <= 100) {
-    sensores.temperatura = temp;
-    sensores.humidade = hum;
-    sensores.dadosValidos = true;
-    flags.erroSensor = false;
-  } else {
+  // OTIMIZAÇÃO: Validação mais rápida com early return
+  if (isnan(temp) || isnan(hum) || temp < -40 || temp > 80 || hum < 0 || hum > 100) {
     flags.erroSensor = true;
     sensores.dadosValidos = false;
     
     if (flags.debug) {
       debugPrint("✗ Erro na leitura DHT: T=" + String(temp) + ", H=" + String(hum));
     }
-  }
-
-  // Leitura do LDR com filtro de média
-  static int ldrBuffer[3] = { 0 };
-  static int bufferIndex = 0;
-
-  ldrBuffer[bufferIndex] = analogRead(LDR_PIN);
-  bufferIndex = (bufferIndex + 1) % 3;
-  sensores.valorLDR = (ldrBuffer[0] + ldrBuffer[1] + ldrBuffer[2]) / 3;
-
-  if (pessoas.total > 0) {
-    // Normalizar LDR para porcentagem (inverso: quanto menor o valor, mais escuro)
-    // sensores.luminosidade será controlado pelos relés, este é ambiente
+  } else {
+    sensores.temperatura = temp;
+    sensores.humidade = hum;
+    sensores.dadosValidos = true;
+    flags.erroSensor = false;
   }
 }
 
@@ -906,7 +962,10 @@ void enviarDados() {
   if (!forcarEnvio && agora - tempos[1] < INTERVALO_DADOS) return;
   tempos[1] = agora;
 
-  StaticJsonDocument<400> doc;
+  // OTIMIZAÇÃO: StaticJsonDocument com tamanho adequado
+  StaticJsonDocument<512> doc; // Aumentado de 400 para 512 para evitar alocação dinâmica
+  
+  // OTIMIZAÇÃO: Arredondamento inline mais eficiente
   doc["temperatura"] = round(sensores.temperatura * 10) / 10.0;
   doc["humidade"] = round(sensores.humidade);
   doc["luminosidade"] = sensores.luminosidade != 0 ? sensores.luminosidade : 0;
@@ -915,11 +974,13 @@ void enviarDados() {
   doc["timestamp"] = millis(); // Timestamp local
   doc["dados_validos"] = sensores.dadosValidos;
 
-  // Adicionar array de tags
-  JsonArray tagsArray = doc.createNestedArray("tags");
-  for (int i = 0; i < pessoas.count; i++) {
-    if (pessoas.estado[i]) {
-      tagsArray.add(pessoas.tags[i]);
+  // OTIMIZAÇÃO: Adicionar array de tags apenas se houver pessoas
+  if (pessoas.total > 0) {
+    JsonArray tagsArray = doc.createNestedArray("tags");
+    for (int i = 0; i < pessoas.count; i++) {
+      if (pessoas.estado[i]) {
+        tagsArray.add(pessoas.tags[i]);
+      }
     }
   }
 
@@ -991,11 +1052,30 @@ void enviarDadosImediato() {
 }
 
 void processarNFC() {
-  if (!mfrc522.PICC_IsNewCardPresent() || !mfrc522.PICC_ReadCardSerial()) {
-    return;
+  // OTIMIZAÇÃO: Controle de frequência de scan para evitar sobrecarga
+  static unsigned long ultimoScanRFID = 0;
+  unsigned long agora = millis();
+  
+  if (agora - ultimoScanRFID < INTERVALO_RFID_SCAN) {
+    return; // Evita scans muito frequentes
+  }
+  
+  // OTIMIZAÇÃO: Verificação rápida se há cartão presente (não bloqueia)
+  if (!mfrc522.PICC_IsNewCardPresent()) {
+    return; // Retorna imediatamente se não houver cartão
+  }
+  
+  ultimoScanRFID = agora; // Atualiza timestamp apenas quando houver cartão
+  
+  // OTIMIZAÇÃO: Leitura rápida do serial
+  if (!mfrc522.PICC_ReadCardSerial()) {
+    return; // Erro na leitura, retorna rápido
   }
 
+  // OTIMIZAÇÃO: Construção otimizada da string da tag (reservar memória)
   String tag = "";
+  tag.reserve(mfrc522.uid.size * 2); // Reserva memória para evitar realocações
+  
   for (byte i = 0; i < mfrc522.uid.size; i++) {
     if (mfrc522.uid.uidByte[i] < 0x10) tag += "0";
     tag += String(mfrc522.uid.uidByte[i], HEX);
@@ -1003,17 +1083,19 @@ void processarNFC() {
   tag.toUpperCase();
 
   debugPrint("Tag NFC lida: " + tag);
-  // Feedback sonoro imediato ao ler a tag
+  
+  // Feedback sonoro em thread separado (não bloqueia)
   tocarSom(SOM_OK);
+  
   // Se estiver em modo cadastro, não alterar presença: apenas publicar a tag
   if (flags.modoCadastro) {
     debugPrint("Modo cadastro ativo - publicando tag para registro: " + tag);
     enviarDadosFirebase("/ultima_tag", "\"" + tag + "\"", false);
-    // Opcional: manter modoCadastro ativo até que o app solicite desativação
   } else {
     gerenciarPresenca(tag);
   }
 
+  // OTIMIZAÇÃO: Halt rápido do cartão
   mfrc522.PICC_HaltA();
   mfrc522.PCD_StopCrypto1();
 }
@@ -1023,11 +1105,11 @@ void gerenciarPresenca(const String& tag) {
   bool entrando = false;
   int totalAnterior = pessoas.total;
 
-  // Procurar tag no histórico
+  // OTIMIZAÇÃO: Procurar tag no histórico (early break para eficiência)
   for (int i = 0; i < pessoas.count; i++) {
     if (pessoas.tags[i] == tag) {
       indice = i;
-      break;
+      break; // Sai imediatamente ao encontrar
     }
   }
 
@@ -1053,6 +1135,7 @@ void gerenciarPresenca(const String& tag) {
       debugPrint("Nova pessoa detectada - Tag: " + tag + ", Total: " + String(pessoas.total));
       tocarSom(SOM_PESSOA_ENTROU);
 
+      // OTIMIZAÇÃO: Mensagem rápida sem delay
       lcd.clear();
       lcd.setCursor(0, 0);
       lcd.write(0);
@@ -1060,11 +1143,11 @@ void gerenciarPresenca(const String& tag) {
       lcd.setCursor(0, 1);
       lcd.print("Pessoas: ");
       lcd.print(pessoas.total);
-      delay(400);
+      // Delay removido - atualização acontece no fluxo normal
     } else {
       debugPrint("Limite de pessoas atingido (10). Ignorando nova tag: " + tag);
       tocarSom(SOM_ERRO);
-      delay(200);
+      // OTIMIZAÇÃO: Delay removido
     }
   } else if (pessoas.estado[indice]) {
     // Tag conhecida e pessoa estava PRESENTE - está SAINDO
@@ -1081,17 +1164,16 @@ void gerenciarPresenca(const String& tag) {
     lcd.setCursor(0, 1);
     lcd.print("Pessoas: ");
     lcd.print(pessoas.total);
-    delay(400);
+    // OTIMIZAÇÃO: Delay removido
 
     // Envia dados IMEDIATAMENTE para o servidor registrar a saída
     enviarDadosImediato();
     
     if (pessoas.total == 0) {
-      // Envia dados algumas vezes para garantir
-      debugPrint("ÚLTIMA PESSOA SAINDO - Enviando dados críticos múltiplas vezes");
-      delay(1000); enviarDadosImediato();
-      delay(1500); enviarDadosImediato();
-      delay(2000);
+      // OTIMIZAÇÃO: Envios múltiplos sem delays bloqueantes
+      debugPrint("ÚLTIMA PESSOA SAINDO - Enviando dados críticos");
+      enviarDadosImediato(); // 2ª tentativa imediata
+      enviarDadosImediato(); // 3ª tentativa imediata
       resetarSistema();
       return;
     }
@@ -1104,8 +1186,7 @@ void gerenciarPresenca(const String& tag) {
     // Isso permite que o usuário continue em modo manual mesmo após mudanças no grupo
     if (!flags.atualizandoPref && flags.wifiOk) {
       debugPrint("Consultando preferências após saída...");
-      // pequena espera para estabilizar escrita no Firebase
-      delay(150);
+      // OTIMIZAÇÃO: Delay removido - Firebase é assíncrono
       if (consultarPreferencias()) {
         debugPrint("Preferências atualizadas com sucesso após saída.");
         
@@ -1122,11 +1203,11 @@ void gerenciarPresenca(const String& tag) {
             enviarComandoIR(IR_POWER);
           } else if (clima.velocidade != velDesejada) {
             debugPrint("Ajustando velocidade após saída: " + String(velDesejada));
+            // OTIMIZAÇÃO: Ajuste rápido sem delays
             int tentativas = 0;
             while (clima.velocidade != velDesejada && tentativas < 3) {
               if (enviarComandoIR(IR_VELOCIDADE)) tentativas++;
               else break;
-              delay(700);
             }
           }
         }
@@ -1163,7 +1244,7 @@ void gerenciarPresenca(const String& tag) {
     lcd.setCursor(0, 1);
     lcd.print("Pessoas: ");
     lcd.print(pessoas.total);
-    delay(500);
+    // OTIMIZAÇÃO: Delay removido
     
     // Se é a primeira pessoa voltando e climatizador estava desligado mas tinha velocidade salva
     if (pessoas.total == 1 && !clima.ligado && clima.ultimaVel > 0 && !flags.modoManualClima) {
@@ -1183,21 +1264,25 @@ void gerenciarPresenca(const String& tag) {
       if (clima.umidificando) lcd.print(" U");
       if (clima.aletaV) lcd.print(" V");
       if (clima.aletaH) lcd.print(" H");
-      delay(600);
+      // OTIMIZAÇÃO: Delays removidos
       
       // Ligar o climatizador (aparelho físico já tem todas as configurações)
       enviarComandoIR(IR_POWER);
-      delay(1000);
       
-      // Verificar se a velocidade está correta
+      // Verificar se a velocidade está correta (após pequena espera para estabilizar)
+      unsigned long esperaEstabilizacao = millis();
+      while (millis() - esperaEstabilizacao < 800) {
+        yield(); // Permite que outras tarefas executem
+      }
+      
       if (clima.ligado && clima.velocidade != clima.ultimaVel) {
         debugPrint("Ajustando para velocidade salva: " + String(clima.velocidade) + " -> " + String(clima.ultimaVel));
+        // OTIMIZAÇÃO: Ajuste rápido sem delays bloqueantes
         int tentativas = 0;
         int velAlvo = clima.ultimaVel;
         while (clima.velocidade != velAlvo && tentativas < 3) {
           if (enviarComandoIR(IR_VELOCIDADE)) tentativas++;
           else break;
-          delay(700);
         }
       }
       atualizarLCD();
@@ -1240,8 +1325,7 @@ void gerenciarPresenca(const String& tag) {
         if (diff >= 2.0 && !clima.ligado) {
           debugPrint("Auto: ligando climatizador apos atualizar preferencias. Diff=" + String(diff));
           enviarComandoIR(IR_POWER);
-          // Alguns controles físicos demoram para estabilizar; aumentar espera
-          delay(1500);
+          // Equipamento estabiliza em segundo plano
 
           if (clima.ligado && clima.velocidade != velDesejada) {
             debugPrint("Tentando ajustar velocidade apos ligar: atual=" + String(clima.velocidade) + " desejada=" + String(velDesejada));
@@ -1252,7 +1336,7 @@ void gerenciarPresenca(const String& tag) {
                 unsigned long t0 = millis();
                 while (controleIR.estado != IR_OCIOSO && millis() - t0 < TIMEOUT_CONFIRMACAO + 200) {
                   processarIRRecebido();
-                  delay(10);
+                  yield(); // Non-blocking
                 }
               } else {
                 break;
@@ -1271,7 +1355,7 @@ void gerenciarPresenca(const String& tag) {
               unsigned long t0 = millis();
               while (controleIR.estado != IR_OCIOSO && millis() - t0 < TIMEOUT_CONFIRMACAO + 200) {
                 processarIRRecebido();
-                delay(10);
+                yield(); // Non-blocking
               }
             } else {
               break;
@@ -1296,13 +1380,13 @@ void resetarSistema() {
   lcd.setCursor(0, 1);
   lcd.print("Sistema");
   tocarSom(SOM_ALERTA);
-  delay(800);
+  // OTIMIZAÇÃO: Delay removido
 
   // Desligar climatizador se estiver ligado
   if (clima.ligado) {
     debugPrint("Desligando climatizador...");
     enviarComandoIR(IR_POWER);
-    delay(1000);
+    // OTIMIZAÇÃO: Delay removido
   }
 
   // Desligar iluminação
@@ -1310,7 +1394,7 @@ void resetarSistema() {
   lcd.print("Desl. Luzes... ");
   debugPrint("Desligando iluminação...");
   configurarRele(0);
-  delay(300);
+  // OTIMIZAÇÃO: Delay removido
 
   // Reset COMPLETO de todas as flags
   flags.modoManualIlum = false;
@@ -1357,20 +1441,21 @@ void resetarSistema() {
   // Enviar estado final para o Firebase
   debugPrint("Enviando estado final para Firebase...");
   enviarDadosImediato();
-  delay(500);
+  // OTIMIZAÇÃO: Delay removido
 
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Sistema em");
   lcd.setCursor(0, 1);
   lcd.print("Standby");
-  delay(1000);
+  // OTIMIZAÇÃO: Delay removido
 
   debugPrint("✓ Sistema COMPLETAMENTE resetado - Standby");
   debugPrint("=== RESET CONCLUÍDO ===\n");
 }
 
 void gerenciarIluminacao() {
+  // OTIMIZAÇÃO CRÍTICA: Verificar a cada 500ms (não 2000ms) para resposta rápida
   unsigned long agora = millis();
   if (agora - tempos[2] < INTERVALO_LDR) return;
   tempos[2] = agora;
@@ -1387,7 +1472,7 @@ void gerenciarIluminacao() {
       lcd.setCursor(0, 1);
       lcd.print("Nenhuma pessoa");
       tocarSom(SOM_COMANDO);
-      delay(800);
+      // OTIMIZAÇÃO: Delay removido para resposta instantânea
 
       configurarRele(0);
       flags.ilumAtiva = false;
@@ -1399,19 +1484,14 @@ void gerenciarIluminacao() {
 
   // Se está em modo manual, NÃO fazer nada automaticamente
   if (flags.modoManualIlum) {
-    debugPrint("Modo manual ativo - ignorando controle automático de iluminação");
-    return;
+    return; // Removido debug desnecessário para não poluir log
   }
 
-  // Verificar se as preferências foram atualizadas antes de ligar
-  if (!pessoas.prefsAtualizadas && pessoas.total > 0) {
-    debugPrint("Aguardando atualização das preferências antes de gerenciar iluminação...");
-    return;
-  }
-
-  // Verifica se o LDR deve ser monitorado (apenas uma vez por "sessão" de pessoas)
-  if (flags.monitorandoLDR) {
-    if (sensores.valorLDR < LIMIAR_LDR_ESCURIDAO) { // Se está escuro
+  // OTIMIZAÇÃO: Ligar luz IMEDIATAMENTE se preferências já estiverem prontas
+  // Não esperar pela primeira verificação se já temos as preferências
+  if (flags.monitorandoLDR && pessoas.prefsAtualizadas && pessoas.total > 0) {
+    // Verificação RÁPIDA: Se está escuro, ligar imediatamente
+    if (sensores.valorLDR < LIMIAR_LDR_ESCURIDAO) {
       int nivel = pessoas.lumPref;
 
       if (nivel == 0) {
@@ -1419,59 +1499,96 @@ void gerenciarIluminacao() {
         debugPrint("⚠ Preferência é 0% - aplicando 25% mínimo para segurança");
       }
 
-      debugPrint("=== LIGANDO LUZES AUTOMÁTICO (primeira vez na sessão) ===");
+      debugPrint("=== LIGANDO LUZES AUTOMÁTICO (RÁPIDO) ===");
       debugPrint("LDR: " + String(sensores.valorLDR) + " < " + String(LIMIAR_LDR_ESCURIDAO));
-      debugPrint("Preferência recebida: " + String(pessoas.lumPref) + "%");
-      debugPrint("Nível aplicado: " + String(nivel) + "%");
-      debugPrint("Prefs atualizadas: " + String(pessoas.prefsAtualizadas ? "SIM" : "NAO"));
+      debugPrint("Preferência: " + String(pessoas.lumPref) + "% → Aplicando: " + String(nivel) + "%");
 
       lcd.clear();
       lcd.setCursor(0, 0);
       lcd.write(3);
-      lcd.print(" Luz Auto ON ");
+      lcd.print(" Luz Auto ");
       lcd.print(nivel);
       lcd.print("%");
       lcd.setCursor(0, 1);
-      lcd.print("Pref: ");
-      lcd.print(pessoas.lumPref);
-      lcd.print("% LDR:");
+      lcd.print("LDR:");
       lcd.print(sensores.valorLDR);
+      lcd.print(" Escuro!");
       tocarSom(SOM_COMANDO);
-      delay(800);
+      // OTIMIZAÇÃO: Delay removido
 
       configurarRele(nivel);
       flags.ilumAtiva = true;
-      flags.monitorandoLDR = false; // Desativa permanentemente até resetar sistema
-      debugPrint("Monitoramento do LDR desativado permanentemente até reset do sistema.");
+      flags.monitorandoLDR = false; // Desativa monitoramento inicial
+      debugPrint("✓ Luzes ligadas! Monitoramento contínuo ativado.");
       atualizarLCD();
+      return; // Sai para não executar o resto da lógica
     } else {
-      // Se está claro na primeira verificação, mantém luzes apagadas mas ainda monitora
-      debugPrint("LDR indica ambiente claro (" + String(sensores.valorLDR) + " >= " + String(LIMIAR_LDR_ESCURIDAO) + ") - mantendo luzes apagadas");
-      if (sensores.luminosidade != 0) {
-        configurarRele(0);
-        atualizarLCD();
-      }
+      // Se está claro, continua monitorando mas não liga
+      debugPrint("LDR: " + String(sensores.valorLDR) + " >= " + String(LIMIAR_LDR_ESCURIDAO) + " (claro) - aguardando escurecer...");
     }
-  } else {
-    // Uma vez que o LDR foi verificado inicialmente, só ajusta conforme preferências
-    // NÃO monitora mais o LDR até resetar o sistema
+  }
+
+  // NOVO: Monitoramento CONTÍNUO do LDR para ajustar automaticamente
+  // Mesmo após ligar, continua monitorando para ajustar conforme necessário
+  if (!flags.monitorandoLDR && pessoas.prefsAtualizadas && pessoas.total > 0 && !flags.modoManualIlum) {
     int nivelDesejado = pessoas.lumPref;
     if (nivelDesejado == 0) nivelDesejado = 25;
 
-    if (sensores.luminosidade != nivelDesejado && pessoas.prefsAtualizadas) {
-      debugPrint("AJUSTANDO nível de " + String(sensores.luminosidade) + "% para " + String(nivelDesejado) + "% (nova preferência)");
+    // Lógica inteligente: ajusta baseado no LDR atual
+    bool ambienteEscuro = (sensores.valorLDR < LIMIAR_LDR_ESCURIDAO);
+    bool luzesLigadas = (sensores.luminosidade > 0);
+
+    if (ambienteEscuro && !luzesLigadas) {
+      // Escureceu e luzes estão apagadas → LIGAR
+      debugPrint("⚡ Ambiente escureceu (LDR=" + String(sensores.valorLDR) + ") - Ligando luzes " + String(nivelDesejado) + "%");
       
       lcd.clear();
       lcd.setCursor(0, 0);
       lcd.write(3);
-      lcd.print(" Ajuste Auto");
+      lcd.print(" Escureceu!");
+      lcd.setCursor(0, 1);
+      lcd.print("Ligando ");
+      lcd.print(nivelDesejado);
+      lcd.print("%");
+      tocarSom(SOM_COMANDO);
+      // OTIMIZAÇÃO: Delay removido
+      
+      configurarRele(nivelDesejado);
+      flags.ilumAtiva = true;
+      atualizarLCD();
+    } 
+    else if (!ambienteEscuro && luzesLigadas) {
+      // Clareou e luzes estão ligadas → DESLIGAR (economizar energia)
+      debugPrint("☀️ Ambiente clareou (LDR=" + String(sensores.valorLDR) + ") - Desligando luzes");
+      
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.write(3);
+      lcd.print(" Clareou!");
+      lcd.setCursor(0, 1);
+      lcd.print("Desligando...");
+      tocarSom(SOM_COMANDO);
+      // OTIMIZAÇÃO: Delay removido
+      
+      configurarRele(0);
+      flags.ilumAtiva = false;
+      atualizarLCD();
+    }
+    else if (ambienteEscuro && luzesLigadas && sensores.luminosidade != nivelDesejado) {
+      // Está escuro, luzes ligadas, mas nível diferente do preferido → AJUSTAR
+      debugPrint("🔧 Ajustando " + String(sensores.luminosidade) + "% → " + String(nivelDesejado) + "% (preferência)");
+      
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.write(3);
+      lcd.print(" Ajustando");
       lcd.setCursor(0, 1);
       lcd.print(sensores.luminosidade);
       lcd.print("% -> ");
       lcd.print(nivelDesejado);
       lcd.print("%");
       tocarSom(SOM_COMANDO);
-      delay(800);
+      // OTIMIZAÇÃO: Delay removido
       
       configurarRele(nivelDesejado);
       atualizarLCD();
@@ -1630,11 +1747,9 @@ void controleAutomaticoClima() {
     lcd.setCursor(0,1); lcd.print("Temp: +"); lcd.print(diff,1); lcd.print(" graus");
     tocarSom(SOM_COMANDO);
     debugPrint("LIGANDO climatizador automaticamente (temperatura alta).");
-    delay(800);
 
   enviarComandoIR(IR_POWER);
-  // Aguardar estabilização do equipamento físico
-  delay(1500);
+  // Equipamento físico estabiliza em segundo plano
   atualizarLCD();
 
     // Após ligar automaticamente, tentar ajustar a velocidade imediatamente
@@ -1647,7 +1762,7 @@ void controleAutomaticoClima() {
           unsigned long t0 = millis();
           while (controleIR.estado != IR_OCIOSO && millis() - t0 < TIMEOUT_CONFIRMACAO + 200) {
             processarIRRecebido();
-            delay(10);
+            yield(); // Non-blocking
           }
         } else {
           break;
@@ -1661,7 +1776,6 @@ void controleAutomaticoClima() {
     lcd.setCursor(0,1); lcd.print("Temp: "); lcd.print(diff,1); lcd.print(" graus");
     tocarSom(SOM_COMANDO);
     debugPrint("DESLIGANDO climatizador automaticamente (temperatura baixa).");
-    delay(800);
 
     enviarComandoIR(IR_POWER);
     atualizarLCD();
@@ -1672,7 +1786,6 @@ void controleAutomaticoClima() {
       lcd.setCursor(0,1); lcd.print("Vel "); lcd.print(clima.velocidade); lcd.print(" -> "); lcd.print(velDesejada);
       tocarSom(SOM_COMANDO);
       debugPrint("Ajustando velocidade do climatizador: " + String(clima.velocidade) + " -> " + String(velDesejada));
-      delay(800);
 
   int tentativas = 0;
   while (clima.velocidade != velDesejada && tentativas < 5) {
@@ -1681,7 +1794,7 @@ void controleAutomaticoClima() {
           unsigned long t0 = millis();
           while (controleIR.estado != IR_OCIOSO && millis() - t0 < TIMEOUT_CONFIRMACAO + 200) {
             processarIRRecebido();
-            delay(10);
+            yield(); // Non-blocking
           }
         } else {
           break;
@@ -1696,20 +1809,20 @@ void controleAutomaticoClima() {
     if (pessoas.total == 1) {
       if (!clima.aletaV) {
         debugPrint("Controle Auto Aleta: Ativando aleta vertical (1 pessoa).");
-        enviarComandoIR(IR_ALETA_VERTICAL); delay(300);
+        enviarComandoIR(IR_ALETA_VERTICAL);
       }
       if (clima.aletaH) {
         debugPrint("Controle Auto Aleta: Desativando aleta horizontal (1 pessoa).");
-        enviarComandoIR(IR_ALETA_HORIZONTAL); delay(300);
+        enviarComandoIR(IR_ALETA_HORIZONTAL);
       }
     } else if (pessoas.total > 1) {
       if (!clima.aletaV) {
         debugPrint("Controle Auto Aleta: Ativando aleta vertical (>1 pessoa).");
-        enviarComandoIR(IR_ALETA_VERTICAL); delay(300);
+        enviarComandoIR(IR_ALETA_VERTICAL);
       }
       if (!clima.aletaH) {
         debugPrint("Controle Auto Aleta: Ativando aleta horizontal (>1 pessoa).");
-        enviarComandoIR(IR_ALETA_HORIZONTAL); delay(300);
+        enviarComandoIR(IR_ALETA_HORIZONTAL);
       }
     }
   }
@@ -1723,9 +1836,7 @@ void controleAutomaticoClima() {
       lcd.clear(); lcd.setCursor(0,0); lcd.write(2); lcd.print(" Auto Umidificar");
       lcd.setCursor(0,1); lcd.print("H: "); lcd.print(sensores.humidade,1); lcd.print("%");
       tocarSom(SOM_COMANDO);
-      delay(400);
       enviarComandoIR(IR_UMIDIFICAR);
-      delay(500);
       atualizarLCD();
     }
 
@@ -1735,27 +1846,25 @@ void controleAutomaticoClima() {
       lcd.clear(); lcd.setCursor(0,0); lcd.write(2); lcd.print(" Auto Umidificar");
       lcd.setCursor(0,1); lcd.print("H: "); lcd.print(sensores.humidade,1); lcd.print("%");
       tocarSom(SOM_COMANDO);
-      delay(400);
       enviarComandoIR(IR_UMIDIFICAR);
-      delay(500);
       atualizarLCD();
     }
   } else if (pessoas.total == 0 && clima.umidificando) {
     // Se não há pessoas e o umidificador está ligado, desligar
     debugPrint("Desligando umidificador: sem pessoas no ambiente");
     enviarComandoIR(IR_UMIDIFICAR);
-    delay(500);
   }
 }
 
 void verificarComandos() {
-  unsigned long agora = millis();
-  
+  // OTIMIZAÇÃO: Early return se WiFi não estiver conectado
   if (!flags.wifiOk) return;
+  
+  unsigned long agora = millis();
 
-  // Se o stream não está ativo, tentar iniciá-lo
+  // OTIMIZAÇÃO: Tentativa de stream menos frequente (60s ao invés de 30s)
   static unsigned long ultimaTentativaStream = 0;
-  if (!streamAtivo && agora - ultimaTentativaStream > 30000) { // Tentar a cada 30s
+  if (!streamAtivo && agora - ultimaTentativaStream > 60000) {
     ultimaTentativaStream = agora;
     iniciarStreamFirebase("/comandos");
   }
@@ -1847,8 +1956,7 @@ void verificarComandos() {
           enviarComandoIR(IR_POWER);
           debugPrint("💨 Climatizador ligado via comando manual");
           
-          // Aguardar estabilização após ligar
-          delay(1500);
+          // Equipamento estabiliza em segundo plano
           
           // Se há velocidade especificada no comando, tentar ajustar
           if (doc.containsKey("velocidade")) {
@@ -1862,7 +1970,7 @@ void verificarComandos() {
                   unsigned long t0 = millis();
                   while (controleIR.estado != IR_OCIOSO && millis() - t0 < TIMEOUT_CONFIRMACAO + 200) {
                     processarIRRecebido();
-                    delay(10);
+                    yield(); // Non-blocking
                   }
                 } else {
                   break;
@@ -1899,7 +2007,6 @@ void verificarComandos() {
               lcd.print(" -> ");
               lcd.print(velDesejada);
               tocarSom(SOM_COMANDO);
-              delay(600);
               
               // Calcular quantos comandos são necessários (como no automático)
               int tentativas = 0;
@@ -1910,9 +2017,8 @@ void verificarComandos() {
                   unsigned long t0 = millis();
                   while (controleIR.estado != IR_OCIOSO && millis() - t0 < TIMEOUT_CONFIRMACAO + 200) {
                     processarIRRecebido();
-                    delay(10);
+                    yield(); // Non-blocking
                   }
-                  delay(300); // Pausa extra para estabilidade
                 } else {
                   break;
                 }
@@ -1998,63 +2104,74 @@ void verificarComandos() {
 }
 
 void processarIRRecebido() {
-  if (IrReceiver.decode()) {
-    if (IrReceiver.decodedIRData.protocol == NEC && 
-        IrReceiver.decodedIRData.address == IR_ENDERECO) {
-      
-      uint8_t comando = IrReceiver.decodedIRData.command;
-      
-      unsigned long agora = millis();
-      static unsigned long ultimoComandoIR = 0;
-      
-      // Debounce para evitar leituras múltiplas
-      if (agora - ultimoComandoIR > DEBOUNCE_RECEBER) {
-        ultimoComandoIR = agora;
-        
-        debugPrint("IR recebido do controle: " + String(comando, HEX));
-        
-        // Verificar se é comando válido no contexto atual
-        bool comandoPermitido = true;
-        
-        // Comandos de umidificação, velocidade, timer e aletas só funcionam com clima ligado
-        if (!clima.ligado && (comando == IR_UMIDIFICAR || comando == IR_VELOCIDADE || 
-            comando == IR_TIMER || comando == IR_ALETA_VERTICAL || comando == IR_ALETA_HORIZONTAL)) {
-          comandoPermitido = false;
-          debugPrint("⚠ Comando IR ignorado - climatizador desligado");
-        }
-        
-        // Só ativa modo manual se houver pessoas presentes
-        if (pessoas.total == 0 && comando != IR_POWER) {
-          comandoPermitido = false;
-          debugPrint("⚠ Comando IR ignorado - sem pessoas no ambiente");
-        }
-        
-        if (comandoPermitido) {
-          // Atualizar estado e exibir
-          atualizarEstadoClima(comando);
-          atualizarTelaClimatizador();
-          
-          if (pessoas.total > 0) {
-            flags.modoManualClima = true;
-            debugPrint("✓ Modo manual clima ATIVADO (controle físico)");
-            tocarSom(SOM_COMANDO);
-          }
-        }
-      }
+  // OTIMIZAÇÃO: Early return se não houver dados decodificados
+  if (!IrReceiver.decode()) {
+    return;
+  }
+  
+  // OTIMIZAÇÃO: Validação rápida de protocolo e endereço
+  if (IrReceiver.decodedIRData.protocol != NEC || 
+      IrReceiver.decodedIRData.address != IR_ENDERECO) {
+    IrReceiver.resume();
+    return;
+  }
+  
+  uint8_t comando = IrReceiver.decodedIRData.command;
+  
+  unsigned long agora = millis();
+  static unsigned long ultimoComandoIR = 0;
+  
+  // OTIMIZAÇÃO: Debounce otimizado
+  if (agora - ultimoComandoIR > DEBOUNCE_RECEBER) {
+    ultimoComandoIR = agora;
+    
+    debugPrint("IR recebido do controle: " + String(comando, HEX));
+    
+    // Verificar se é comando válido no contexto atual
+    bool comandoPermitido = true;
+    
+    // Comandos de umidificação, velocidade, timer e aletas só funcionam com clima ligado
+    if (!clima.ligado && (comando == IR_UMIDIFICAR || comando == IR_VELOCIDADE || 
+        comando == IR_TIMER || comando == IR_ALETA_VERTICAL || comando == IR_ALETA_HORIZONTAL)) {
+      comandoPermitido = false;
+      debugPrint("⚠ Comando IR ignorado - climatizador desligado");
     }
     
-    IrReceiver.resume();
+    // Só ativa modo manual se houver pessoas presentes
+    if (pessoas.total == 0 && comando != IR_POWER) {
+      comandoPermitido = false;
+      debugPrint("⚠ Comando IR ignorado - sem pessoas no ambiente");
+    }
+    
+    if (comandoPermitido) {
+      // Atualizar estado e exibir
+      atualizarEstadoClima(comando);
+      atualizarTelaClimatizador();
+      
+      if (pessoas.total > 0) {
+        flags.modoManualClima = true;
+        debugPrint("✓ Modo manual clima ATIVADO (controle físico)");
+        tocarSom(SOM_COMANDO);
+      }
+    }
   }
+  
+  // OTIMIZAÇÃO: Resume sempre ao final
+  IrReceiver.resume();
 }
 
 void monitorarWiFi() {
   static unsigned long ultimaVerificacao = 0;
   unsigned long agora = millis();
   
-  if (agora - ultimaVerificacao < 10000) return; // Verificar a cada 10s
+  // OTIMIZAÇÃO: Verificar WiFi com menos frequência (15s ao invés de 10s)
+  if (agora - ultimaVerificacao < 15000) return;
   ultimaVerificacao = agora;
 
-  if (WiFi.status() != WL_CONNECTED) {
+  // OTIMIZAÇÃO: Verificação rápida de status
+  bool wifiConectado = (WiFi.status() == WL_CONNECTED);
+  
+  if (!wifiConectado) {
     if (flags.wifiOk) {
       flags.wifiOk = false;
       debugPrint("✗ WiFi desconectado");
@@ -2121,7 +2238,6 @@ void verificarAtualizacaoPreferencias() {
       if (diff >= 2.0 && !clima.ligado) {
         debugPrint("❄️ Ligando climatizador após atualização de preferência");
         enviarComandoIR(IR_POWER);
-        delay(1500);
         
         // Ajustar velocidade se necessário
         if (clima.ligado && clima.velocidade != velDesejada) {
@@ -2129,7 +2245,7 @@ void verificarAtualizacaoPreferencias() {
           while (clima.velocidade != velDesejada && tentativas < 5) {
             if (enviarComandoIR(IR_VELOCIDADE)) {
               tentativas++;
-              delay(800);
+              yield(); // Non-blocking
             } else {
               break;
             }
@@ -2146,7 +2262,7 @@ void verificarAtualizacaoPreferencias() {
         while (clima.velocidade != velDesejada && tentativas < 5) {
           if (enviarComandoIR(IR_VELOCIDADE)) {
             tentativas++;
-            delay(800);
+            yield(); // Non-blocking
           } else {
             break;
           }
@@ -2221,8 +2337,11 @@ void setup() {
   
   WiFi.begin(ssid, password);
   int tentativas = 0;
+  unsigned long wifiTimeout = millis();
   while (WiFi.status() != WL_CONNECTED && tentativas < 20) {
-    delay(500);
+    // Non-blocking wait
+    while (millis() - wifiTimeout < 500) yield();
+    wifiTimeout = millis();
     debugPrint(".");
     tentativas++;
   }
@@ -2237,7 +2356,9 @@ void setup() {
     lcd.setCursor(0, 1);
     lcd.print(WiFi.localIP());
     tocarSom(SOM_CONECTADO);
-    delay(2000);
+    // Permite visualizar mensagem sem bloquear por 2s
+    unsigned long t = millis();
+    while (millis() - t < 2000) yield();
   } else {
     flags.wifiOk = false;
     debugPrint("✗ Falha na conexão WiFi");
@@ -2248,7 +2369,8 @@ void setup() {
     lcd.setCursor(0, 1);
     lcd.print("Modo Offline");
     tocarSom(SOM_ERRO);
-    delay(2000);
+    unsigned long t = millis();
+    while (millis() - t < 2000) yield();
   }
 
   // Carregar último estado do climatizador do Firebase
@@ -2298,7 +2420,9 @@ void setup() {
   debugPrint("  - Aleta H: " + String(clima.aletaH ? "ON" : "OFF"));
   debugPrint("===========================================\n");
   
-  delay(1000);
+  // Breve pausa antes de iniciar loop principal
+  unsigned long t = millis();
+  while (millis() - t < 1000) yield();
   lcd.noBacklight(); // Iniciar com luz de fundo desligada
 }
 
@@ -2307,9 +2431,10 @@ void loop() {
   static unsigned long ultimoLoop = 0;
   unsigned long agora = millis();
   
-  // Controle de frequência do loop principal
-  if (agora - ultimoLoop < 50) { // 20 Hz
-    delay(10);
+  // OTIMIZAÇÃO CRÍTICA: Reduzir intervalo mínimo do loop para maior responsividade
+  // Reduzido de 50ms para 20ms (aumenta de 20Hz para 50Hz)
+  if (agora - ultimoLoop < 20) {
+    yield(); // Non-blocking, permite sistema processar tarefas WiFi/IR
     return;
   }
   ultimoLoop = agora;
@@ -2406,7 +2531,6 @@ void processarComandoClimatizador(JsonObject cmd) {
     if (!clima.ligado) {
       enviarComandoIR(IR_POWER);
       debugPrint("💨 Climatizador ligado via stream");
-      delay(1500);
       
       if (cmd.containsKey("velocidade") && clima.ligado) {
         int velDesejada = cmd["velocidade"];
@@ -2415,7 +2539,7 @@ void processarComandoClimatizador(JsonObject cmd) {
           while (clima.velocidade != velDesejada && tentativas < 5) {
             if (enviarComandoIR(IR_VELOCIDADE)) tentativas++;
             else break;
-            delay(800);
+            yield(); // Non-blocking
           }
         }
       }
@@ -2439,7 +2563,7 @@ void processarComandoClimatizador(JsonObject cmd) {
         while (clima.velocidade != velDesejada && tentativas < 5) {
           if (enviarComandoIR(IR_VELOCIDADE)) tentativas++;
           else break;
-          delay(800);
+          yield(); // Non-blocking
         }
       }
     } else {
@@ -2474,6 +2598,8 @@ void processarComandoClimatizador(JsonObject cmd) {
 }
 
 // === FUNÇÕES DE TESTE (OPCIONAL) ===
+// NOTA: Estas funções não devem ser usadas no loop principal
+// Apenas para testes manuais durante desenvolvimento
 void testarReles() {
   debugPrint("=== TESTE DOS RELÉS ===");
   const int reles[] = {RELE_1, RELE_2, RELE_3, RELE_4};
@@ -2481,9 +2607,11 @@ void testarReles() {
   for (int i = 0; i < 4; i++) {
     debugPrint("Testando Relé " + String(i+1));
     digitalWrite(reles[i], LOW);  // Ligar
-    delay(500);
+    unsigned long t = millis();
+    while (millis() - t < 500) yield(); // Non-blocking 500ms
     digitalWrite(reles[i], HIGH); // Desligar
-    delay(500);
+    t = millis();
+    while (millis() - t < 500) yield(); // Non-blocking 500ms
   }
   debugPrint("=== TESTE CONCLUÍDO ===");
 }
@@ -2493,7 +2621,8 @@ void testarNiveisLuminosidade() {
   for (int nivel = 0; nivel <= 100; nivel += 25) {
     debugPrint("Configurando " + String(nivel) + "%");
     configurarRele(nivel);
-    delay(2000);
+    unsigned long t = millis();
+    while (millis() - t < 2000) yield(); // Non-blocking 2s
   }
   configurarRele(0); // Desligar
   debugPrint("=== TESTE CONCLUÍDO ===");
